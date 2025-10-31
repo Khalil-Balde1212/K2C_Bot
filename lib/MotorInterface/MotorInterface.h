@@ -21,7 +21,7 @@ public:
     const int* getCounts() const;
     const float* currentRPM() const;
 
-    void update();
+    void update(unsigned long lastTime, unsigned long currentTime);
 
     // Static members shared by all Motor objects
     static Adafruit_PWMServoDriver pwmDriver;
@@ -29,19 +29,19 @@ public:
 
 
     void printStatus();
-
-private:
     int motorA, motorB;
     int encA, encB;
+    float CountsPerRevolution;
+
+private:
 
     int currentRawSpeed;
-    int currentPosition;
+    int currentCounts, lastCounts;
     float current_rpm;
     float currentVelocity;
 
     bool inverted;
 
-    float CountsPerRevolution;
     float WheelDiameter; // inche
 };
 

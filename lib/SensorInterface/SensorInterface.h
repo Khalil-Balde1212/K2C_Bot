@@ -10,19 +10,27 @@
 #include <algorithm>
 
 
-class IMUInterface{
+class IMUInterface {
 private:
 
-    //IMU variables
+    float sensorRate; 
+    Madgwick filter;
+    
+    // IMU variables
     float ax = 0.0f, ay = 0.0f, az = 0.0f;
     float gx = 0.0f, gy = 0.0f, gz = 0.0f;
     float mx = 0.0f, my = 0.0f, mz = 0.0f;
     
-    //Orientation values
+    // Orientation values
     float roll = 0.0f, pitch = 0.0f, heading = 0.0f;
 
-    Madgwick filter;
-    float sensorRate;
+    float rollOffset = 0.0f;
+    float pitchOffset = 0.0f;
+    float headingOffset = 0.0f;
+    
+    float gx_bias = 0.0f;  // Gyro bias
+    float gy_bias = 0.0f;
+    float gz_bias = 0.0f;
 
 public:
     IMUInterface(float sampleRate = 104.00);
@@ -32,6 +40,9 @@ public:
     float getPitch() const;
     float getYaw() const;
 
+    bool calibrateGyro(int samples = 100); 
+    void calibrateOrientation();            
+    void resetCalibration(); 
 };
 
 namespace TOF{

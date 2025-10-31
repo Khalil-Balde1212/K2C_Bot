@@ -1,11 +1,13 @@
 #include <SensorInterface.h>
 
-IMUInterface::IMUInterface(float sampleRate) : sensorRate(sampleRate),
-                                               ax(0.0f), ay(0.0f), az(0.0f),
-                                               gx(0.0f), gy(0.0f), gz(0.0f),
-                                               mx(0.0f), my(0.0f), mz(0.0f),
-                                               roll(0.0f), pitch(0.0f), heading(0.0f) {
-    filter.begin(sensorRate);
+IMUInterface::IMUInterface(float sampleRate)
+    : sensorRate(sampleRate),  
+      filter(),               
+      ax(0.0f), ay(0.0f), az(0.0f),
+      gx(0.0f), gy(0.0f), gz(0.0f),
+      mx(0.0f), my(0.0f), mz(0.0f),
+      roll(0.0f), pitch(0.0f), heading(0.0f) { 
+    filter.begin(sensorRate);  
 }
 
 bool IMUInterface::begin() {
@@ -14,39 +16,99 @@ bool IMUInterface::begin() {
     }
     return true;
 }
+bool IMUInterface::calibrateGyro(int samples) {
+    Serial.println("Calibrating gyroscope...");
+    Serial.println("Keep device COMPLETELY STILL!");
+    delay(2000);  // Give user time to set it down
+    
+    float sum_gx = 0.0f;
+    float sum_gy = 0.0f;
+    float sum_gz = 0.0f;
+    
+    for (int i = 0; i < samples; i++) {
+        if (IMU.gyroscopeAvailable()) {
+            float temp_gx, temp_gy, temp_gz;
+            IMU.readGyroscope(temp_gx, temp_gy, temp_gz);
+            sum_gx += temp_gx;
+            sum_gy += temp_gy;
+            sum_gz += temp_gz;
+        }
+        delay(10);
+        
+        if (i % 20 == 0) {
+            Serial.print(".");
+        }
+    }
+    
+    gx_bias = sum_gx / samples;
+    gy_bias = sum_gy / samples;
+    gz_bias = sum_gz / samples;
+    
+    Serial.println();
+    Serial.print("Gyro bias: gx=");
+    Serial.print(gx_bias);
+    Serial.print(" gy=");
+    Serial.print(gy_bias);
+    Serial.print(" gz=");
+    Serial.println(gz_bias);
+    Serial.println("Calibration complete!");
+    
+    return true;
+}
 
+void IMUInterface::calibrateOrientation() {
+    rollOffset = roll;
+    pitchOffset = pitch;
+    headingOffset = heading;
+    Serial.println("Orientation zeroed at current position.");
+}
+
+void IMUInterface::resetCalibration() {
+    gx_bias = 0.0f;
+    gy_bias = 0.0f;
+    gz_bias = 0.0f;
+    rollOffset = 0.0f;
+    pitchOffset = 0.0f;
+    headingOffset = 0.0f;
+    Serial.println("All calibration cleared.");
+}
+
+// Update the update() function to use bias correction:
 void IMUInterface::update() {
     if (IMU.accelerationAvailable()) {
         IMU.readAcceleration(ax, ay, az);
     }
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(gx, gy, gz);
-    }
-    bool hasMag = false;
-    if (IMU.magneticFieldAvailable()) {
-        IMU.readMagneticField(mx, my, mz);
-        hasMag = true;
-    }
-    if (hasMag) {
-        filter.update(gx, gy, gz, ax, ay, az, mx, my, mz);
-    } else {
+        
+        gx -= gx_bias;
+        gy -= gy_bias;
+        gz -= gz_bias;
+        
+        // REMOVE THE RADIAN CONVERSION - JUST USE DEGREES/SEC!
         filter.updateIMU(gx, gy, gz, ax, ay, az);
+        
+        roll = filter.getRoll();
+        pitch = filter.getPitch();
+        heading = filter.getYaw();
     }
-    roll = filter.getRoll();
-    pitch = filter.getPitch();
-    heading = filter.getYaw();
 }
 
+
 float IMUInterface::getRoll() const {
-    return roll;
+    return roll - rollOffset;
 }
 
 float IMUInterface::getPitch() const {
-    return pitch;
+    return pitch - pitchOffset;
 }
 
 float IMUInterface::getYaw() const {
-    return heading;
+    float yaw = heading - headingOffset;
+    // Normalize to -180 to 180
+    while (yaw > 180.0f) yaw -= 360.0f;
+    while (yaw < -180.0f) yaw += 360.0f;
+    return yaw;
 }
 
 namespace TOF {
@@ -60,12 +122,19 @@ namespace TOF {
     }
 
     bool TOFSensors::begin() {
-        if (!configSet) return initAttempted = lastInitSuccess = false;
+
+    if (!configSet) return initAttempted = lastInitSuccess = false;
+    
     #if defined(ARDUINO_ARCH_SAMD)
-            sdaPin || sclPin ? Wire.begin(sdaPin, sclPin) : Wire.begin();
-    #else
+        if (sdaPin != 0 || sclPin != 0) {
+            Wire.begin(sdaPin, sclPin);
+        } else {
             Wire.begin();
+        }
+    #else
+        Wire.begin();
     #endif
+
         for (auto pin : xshutPins) { pinMode(pin, OUTPUT); digitalWrite(pin, LOW); }
         delay(100);
         bool allSensorsOk = true;

@@ -1,18 +1,21 @@
 #include <Arduino.h>
+#include <MotorInterface.h>
 
-// put function declarations here:
-int myFunction(int, int);
-
+Motor motor(12, 13, 2, 7);
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+    Motor::begin();
 }
 
+int i = -4095;
+bool up = true;
 void loop() {
-  // put your main code here, to run repeatedly:
-}
+  if(up) i++;
+  else i--;
+  if(i >= 4095) up = false;
+  if(i <= -4095) up = true;
 
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
+  motor.setRawSpeed(i);
+
+  
+  motor.update();
 }

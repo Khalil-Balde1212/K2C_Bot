@@ -23,7 +23,7 @@ void Motor::update(unsigned long lastTime, unsigned long currentTime){
 
 
     // Apply inversion if set
-    if (inverted) currentRawSpeed = -currentRawSpeed;
+    if (invertedMotor) currentRawSpeed = -currentRawSpeed;
     currentRawSpeed = constrain(currentRawSpeed, -4095, 4095);
     
     // Set PWM values based on direction
@@ -34,8 +34,8 @@ void Motor::update(unsigned long lastTime, unsigned long currentTime){
         pwmDriver.setPWM(motorA, 0, 0);
         pwmDriver.setPWM(motorB, 0, -currentRawSpeed);
     } else {
-        pwmDriver.setPWM(motorA, 0, 0);
-        pwmDriver.setPWM(motorB, 0, 0);
+        pwmDriver.setPWM(motorA, 0, 4096);
+        pwmDriver.setPWM(motorB, 0, 4096);
     }
 }
 
@@ -48,10 +48,31 @@ Motor::Motor(int motorPortA, int motorPortB, int encoderPortA, int encoderPortB)
 
     pinMode(encA, INPUT);
     pinMode(encB, INPUT);
+
+    // Initialize member variables
+    invertedMotor = false;
+    invertedEncoder = false;
+    CountsPerRevolution = 1.0f;
+    currentRawSpeed = 0;
+    currentCounts = 0;
+    lastCounts = 0;
+    current_rpm = 0.0f;
+    currentVelocity = 0.0f;
+    WheelDiameter = 0.0f;
 }
 
-Motor Motor::isInverted(bool inverted){
-    Motor::inverted = inverted;
+Motor Motor::invertMotor(bool inverted){
+    Motor::invertedMotor = inverted;
+    return *this;
+}
+
+Motor Motor::invertEncoder(bool inverted){
+    Motor::invertedEncoder = inverted;
+    return *this;
+}
+
+Motor Motor::setCPR(float countsPerRevolution){
+    Motor::CountsPerRevolution = countsPerRevolution;
     return *this;
 }
 
@@ -64,18 +85,27 @@ int* Motor::setRawSpeed(int speed) {
 
 void Motor::updateCounts() {
     if (digitalRead(encA) == digitalRead(encB)) {
-        currentCounts += inverted ? 1 : -1;  // Invert direction if flag is set
+        currentCounts += invertedEncoder ? 1 : -1;  // Invert direction if flag is set
     } else {
-        currentCounts += inverted ? -1 : 1;  // Invert direction if flag is set
+        currentCounts += invertedEncoder ? -1 : 1;  // Invert direction if flag is set
     }
 }
 
 void Motor::printStatus() {
     Serial.print("Current Speed: \t");
-    Serial.println(currentRawSpeed);
-    Serial.print("Current Counts: \t");
-    Serial.println(currentCounts);
-    Serial.print("Current RPM: \t");
+    Serial.print(currentRawSpeed);
+    Serial.print("\t|Current Counts: \t");
+    Serial.print(currentCounts);
+    Serial.print("\t|Current RPM: \t");
     Serial.println(current_rpm);
 }
 
+void Motor::coast(){
+    pwmDriver.setPWM(motorA, 0, 0);
+    pwmDriver.setPWM(motorB, 0, 0);
+}
+
+void Motor::brake(){
+    pwmDriver.setPWM(motorA, 0, 4096);
+    pwmDriver.setPWM(motorB, 0, 4096);
+}

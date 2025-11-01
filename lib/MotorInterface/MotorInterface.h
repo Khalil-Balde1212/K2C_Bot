@@ -9,10 +9,14 @@ public:
 
     Motor(int motorPortA, int motorPortB, int encoderPortA, int encoderPortB);
 
-    Motor isInverted(bool inverted = true);
+    Motor invertMotor(bool inverted = true);
+    Motor invertEncoder(bool inverted = true);
+    Motor setCPR(float countsPerRevolution);
+
     int* setRawSpeed(int speed);
     int getSpeed() const;
-    void stop();
+    void coast();
+    void brake();
 
     void setVelocity(double velocity);
 
@@ -31,16 +35,17 @@ public:
     void printStatus();
     int motorA, motorB;
     int encA, encB;
-    float CountsPerRevolution;
 
 private:
 
+    float CountsPerRevolution;
     int currentRawSpeed;
     int currentCounts, lastCounts;
     float current_rpm;
     float currentVelocity;
 
-    bool inverted;
+    bool invertedMotor;
+    bool invertedEncoder;
 
     float WheelDiameter; // inche
 };

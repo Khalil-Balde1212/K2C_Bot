@@ -5,10 +5,12 @@
 #include "forward_kinematics/fk.h"
 
 // Motors: left/right drive, left/right steering
-Motor leftMotor(12, 13, 2, 7);
-Motor rightMotor(7, 6, 10, 9);
-Motor leftPivot(15, 14, 11, 8);
-Motor rightPivot(5, 4, 3, 4);
+Motor leftMotor(12, 13, 10, 9);
+Motor leftPivot(15, 14, 3, 4);
+
+Motor rightMotor(7, 6, 11, 8);
+Motor rightPivot(5, 4, 2, 7); 
+
 
 // Sensors
 IMUInterface imu(20.0);
@@ -44,11 +46,13 @@ const float COUNTS_PER_REV = 1440.0f;
 
 void setup() {
     Serial.begin(115200);
+    delay(2000);
 
     // Init motors
     Motor::begin();
-    leftMotor.setCPR(1440.0f).invertMotor(true);
-    rightMotor.setCPR(1440.0f).invertMotor(true);
+    leftMotor.setCPR(1440.0f).invertEncoder(true);
+    rightMotor.setCPR(1440.0f).invertEncoder(true);
+
     leftPivot.setCPR(2200.0f).invertEncoder(true);
     rightPivot.setCPR(2200.0f).invertEncoder(true);
 
@@ -248,9 +252,9 @@ void loop() {
         }
     }
     
-    // Debug output at 10Hz
+    // Debug output at 1Hz
     static unsigned long lastPrint = 0;
-    if (Serial && currentTime - lastPrint > 100) {
+    if (Serial && currentTime - lastPrint > 1000) {
         lastPrint = currentTime;
         Serial.print("Target: ");
         Serial.print(targetHeading, 1);

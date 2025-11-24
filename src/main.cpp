@@ -40,6 +40,7 @@ float lastCmdOmega = 0.0f;
 
 void setup() {
     Serial.begin(115200);
+    delay(2000);
 
     // Init motors
     Motor::begin();
@@ -177,16 +178,13 @@ void loop() {
     //     // Execute motion
     //     executeMotion(vx, vy, omega);
         
-
-        leftMotor.setRawSpeed(4096);
-        rightMotor.setRawSpeed(4096);
-        leftPivot.setRawSpeed(4096);
-        rightPivot.setRawSpeed(4096);
+        Motor::pwmDriver.setPWM(12, 0, 4096);
+        // leftMotor.pwmDriver.setPWM(13, 0, 0);
         // Update motors
-        leftMotor.update(lastProcessTime, currentTime);
-        rightMotor.update(lastProcessTime, currentTime);
-        leftPivot.update(lastProcessTime, currentTime);
-        rightPivot.update(lastProcessTime, currentTime);
+        // leftMotor.update(lastProcessTime, currentTime);
+        // rightMotor.update(lastProcessTime, currentTime);
+        // leftPivot.update(lastProcessTime, currentTime);
+        // rightPivot.update(lastProcessTime, currentTime);
     }
     
     // Serial commands

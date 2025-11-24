@@ -6,8 +6,8 @@ Adafruit_PWMServoDriver Motor::pwmDriver = Adafruit_PWMServoDriver();
 
 void Motor::begin(){
     pwmDriver.begin();
-    pwmDriver.setPWMFreq(400);  // This is the maximum PWM frequency
-
+    pwmDriver.setPWMFreq(50);  // This is the maximum PWM frequency
+    Serial.println("Motor PWM Driver Initialized");
 }
 
 void Motor::update(unsigned long lastTime, unsigned long currentTime){
@@ -24,7 +24,7 @@ void Motor::update(unsigned long lastTime, unsigned long currentTime){
 
     // Apply inversion if set
     if (invertedMotor) currentRawSpeed = -currentRawSpeed;
-    currentRawSpeed = constrain(currentRawSpeed, -4095, 4095);
+    currentRawSpeed = constrain(currentRawSpeed, -4096, 4096);
     
     // Set PWM values based on direction
     if (currentRawSpeed > 0) {

@@ -109,3 +109,11 @@ void Motor::brake(){
     pwmDriver.setPWM(motorA, 0, 4096);
     pwmDriver.setPWM(motorB, 0, 4096);
 }
+
+const int* Motor::getCounts() const {
+    return &currentCounts;
+}
+
+const float* Motor::currentRPM() const {
+    return &current_rpm;
+}

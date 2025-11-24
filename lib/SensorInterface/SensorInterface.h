@@ -32,6 +32,16 @@ private:
     float gy_bias = 0.0f;
     float gz_bias = 0.0f;
 
+    // Magnetometer hard iron offsets
+    float mx_offset = 0.0f;
+    float my_offset = 0.0f;
+    float mz_offset = 0.0f;
+
+    // Magnetometer soft iron scale factors
+    float mx_scale = 1.0f;
+    float my_scale = 1.0f;
+    float mz_scale = 1.0f;
+
 public:
     IMUInterface(float sampleRate = 104.00);
     bool begin();
@@ -40,9 +50,19 @@ public:
     float getPitch() const;
     float getYaw() const;
 
-    bool calibrateGyro(int samples = 100); 
-    void calibrateOrientation();            
-    void resetCalibration(); 
+    bool calibrateGyro(int samples = 100);
+    bool calibrateMagnetometer(int durationSeconds = 10);
+    void calibrateOrientation();
+    void resetCalibration();
+
+    // Set calibration values (use after running magcal once and noting the values)
+    void setMagCalibration(float mx_off, float my_off, float mz_off,
+                           float mx_sc, float my_sc, float mz_sc);
+
+    // Debug: get raw magnetometer values
+    float getMx() const { return mx; }
+    float getMy() const { return my; }
+    float getMz() const { return mz; }
 };
 
 namespace TOF{

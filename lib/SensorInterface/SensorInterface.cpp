@@ -1,13 +1,13 @@
 #include <SensorInterface.h>
 
 IMUInterface::IMUInterface(float sampleRate)
-    : sensorRate(sampleRate),  
-      filter(),               
+    : sensorRate(sampleRate),
+      filter(),
       ax(0.0f), ay(0.0f), az(0.0f),
       gx(0.0f), gy(0.0f), gz(0.0f),
       mx(0.0f), my(0.0f), mz(0.0f),
-      roll(0.0f), pitch(0.0f), heading(0.0f) { 
-    filter.begin(sensorRate);  
+      roll(0.0f), pitch(0.0f), heading(0.0f) {
+    filter.begin(sensorRate);
 }
 
 bool IMUInterface::begin() {
@@ -56,6 +56,99 @@ bool IMUInterface::calibrateGyro(int samples) {
     return true;
 }
 
+bool IMUInterface::calibrateMagnetometer(int durationSeconds) {
+    Serial.println("Magnetometer calibration starting...");
+    Serial.println("Slowly rotate the robot 360° in all orientations!");
+    Serial.println("Roll, pitch, and yaw the robot to cover all angles.");
+    delay(2000);
+
+    float mx_min = 9999.0f, mx_max = -9999.0f;
+    float my_min = 9999.0f, my_max = -9999.0f;
+    float mz_min = 9999.0f, mz_max = -9999.0f;
+
+    unsigned long startTime = millis();
+    unsigned long duration = durationSeconds * 1000UL;
+    int samples = 0;
+
+    Serial.print("Calibrating for ");
+    Serial.print(durationSeconds);
+    Serial.println(" seconds...");
+
+    while (millis() - startTime < duration) {
+        if (IMU.magneticFieldAvailable()) {
+            float temp_mx, temp_my, temp_mz;
+            IMU.readMagneticField(temp_mx, temp_my, temp_mz);
+
+            // Track min/max for each axis
+            if (temp_mx < mx_min) mx_min = temp_mx;
+            if (temp_mx > mx_max) mx_max = temp_mx;
+            if (temp_my < my_min) my_min = temp_my;
+            if (temp_my > my_max) my_max = temp_my;
+            if (temp_mz < mz_min) mz_min = temp_mz;
+            if (temp_mz > mz_max) mz_max = temp_mz;
+
+            samples++;
+        }
+
+        // Progress indicator every second
+        if ((millis() - startTime) % 1000 < 50) {
+            int remaining = durationSeconds - (millis() - startTime) / 1000;
+            Serial.print(remaining);
+            Serial.print("s remaining | Samples: ");
+            Serial.print(samples);
+            Serial.print(" | X:[");
+            Serial.print(mx_min, 1);
+            Serial.print(",");
+            Serial.print(mx_max, 1);
+            Serial.print("] Y:[");
+            Serial.print(my_min, 1);
+            Serial.print(",");
+            Serial.print(my_max, 1);
+            Serial.print("] Z:[");
+            Serial.print(mz_min, 1);
+            Serial.print(",");
+            Serial.print(mz_max, 1);
+            Serial.println("]");
+            delay(50);
+        }
+
+        delay(50);  // ~20Hz magnetometer rate
+    }
+
+    // Compute hard iron offsets (center of the ellipsoid)
+    mx_offset = (mx_max + mx_min) / 2.0f;
+    my_offset = (my_max + my_min) / 2.0f;
+    mz_offset = (mz_max + mz_min) / 2.0f;
+
+    // Compute soft iron scale factors (normalize to sphere)
+    float mx_range = (mx_max - mx_min) / 2.0f;
+    float my_range = (my_max - my_min) / 2.0f;
+    float mz_range = (mz_max - mz_min) / 2.0f;
+    float avg_range = (mx_range + my_range + mz_range) / 3.0f;
+
+    if (mx_range > 0) mx_scale = avg_range / mx_range;
+    if (my_range > 0) my_scale = avg_range / my_range;
+    if (mz_range > 0) mz_scale = avg_range / mz_range;
+
+    Serial.println("\n=== Magnetometer Calibration Complete ===");
+    Serial.print("Hard iron offsets: X=");
+    Serial.print(mx_offset, 2);
+    Serial.print(" Y=");
+    Serial.print(my_offset, 2);
+    Serial.print(" Z=");
+    Serial.println(mz_offset, 2);
+    Serial.print("Soft iron scales:  X=");
+    Serial.print(mx_scale, 3);
+    Serial.print(" Y=");
+    Serial.print(my_scale, 3);
+    Serial.print(" Z=");
+    Serial.println(mz_scale, 3);
+    Serial.print("Total samples: ");
+    Serial.println(samples);
+
+    return samples > 50;  // Need reasonable number of samples
+}
+
 void IMUInterface::calibrateOrientation() {
     rollOffset = roll;
     pitchOffset = pitch;
@@ -70,7 +163,37 @@ void IMUInterface::resetCalibration() {
     rollOffset = 0.0f;
     pitchOffset = 0.0f;
     headingOffset = 0.0f;
+    mx_offset = 0.0f;
+    my_offset = 0.0f;
+    mz_offset = 0.0f;
+    mx_scale = 1.0f;
+    my_scale = 1.0f;
+    mz_scale = 1.0f;
     Serial.println("All calibration cleared.");
+}
+
+void IMUInterface::setMagCalibration(float mx_off, float my_off, float mz_off,
+                                      float mx_sc, float my_sc, float mz_sc) {
+    mx_offset = mx_off;
+    my_offset = my_off;
+    mz_offset = mz_off;
+    mx_scale = mx_sc;
+    my_scale = my_sc;
+    mz_scale = mz_sc;
+
+    Serial.println("Magnetometer calibration set:");
+    Serial.print("  Hard iron: X=");
+    Serial.print(mx_offset, 2);
+    Serial.print(" Y=");
+    Serial.print(my_offset, 2);
+    Serial.print(" Z=");
+    Serial.println(mz_offset, 2);
+    Serial.print("  Soft iron: X=");
+    Serial.print(mx_scale, 3);
+    Serial.print(" Y=");
+    Serial.print(my_scale, 3);
+    Serial.print(" Z=");
+    Serial.println(mz_scale, 3);
 }
 
 // Update the update() function to use bias correction:
@@ -78,19 +201,92 @@ void IMUInterface::update() {
     if (IMU.accelerationAvailable()) {
         IMU.readAcceleration(ax, ay, az);
     }
+    if (IMU.magneticFieldAvailable()) {
+        IMU.readMagneticField(mx, my, mz);
+    }
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(gx, gy, gz);
-        
+
         gx -= gx_bias;
         gy -= gy_bias;
         gz -= gz_bias;
-        
-        // REMOVE THE RADIAN CONVERSION - JUST USE DEGREES/SEC!
+
+        // Use Madgwick for roll/pitch (6-DOF is fine for these)
         filter.updateIMU(gx, gy, gz, ax, ay, az);
-        
         roll = filter.getRoll();
         pitch = filter.getPitch();
-        heading = filter.getYaw();
+
+        // Apply magnetometer calibration (hard iron + soft iron)
+        float mx_cal = (mx - mx_offset) * mx_scale;
+        float my_cal = (my - my_offset) * my_scale;
+        float mz_cal = (mz - mz_offset) * mz_scale;
+
+        // Remap axes for robot frame (Y+ toward USB, USB at back)
+        // Robot forward = -Y_board, Robot right = -X_board
+        float mx_robot = -my_cal;  // Robot forward component
+        float my_robot = -mx_cal;  // Robot right component
+        float mz_robot = mz_cal;   // Robot up component
+
+        // Compute tilt-compensated heading from magnetometer
+        // Roll/pitch from Madgwick also need remapping
+        float rollRad = -pitch * DEG_TO_RAD;   // Robot roll = -board pitch
+        float pitchRad = -roll * DEG_TO_RAD;   // Robot pitch = -board roll
+
+        // Tilt compensation
+        float cosRoll = cos(rollRad);
+        float sinRoll = sin(rollRad);
+        float cosPitch = cos(pitchRad);
+        float sinPitch = sin(pitchRad);
+
+        // Compensate magnetometer readings for tilt
+        float mx_comp = mx_robot * cosPitch + mz_robot * sinPitch;
+        float my_comp = mx_robot * sinRoll * sinPitch + my_robot * cosRoll - mz_robot * sinRoll * cosPitch;
+
+        // Compute magnetic heading (with -10° correction for axis alignment)
+        float magHeading = atan2(-my_comp, mx_comp) * RAD_TO_DEG - 10.0f;
+
+        // Complementary filter: fuse gyro-integrated heading with magnetometer
+        // Only trust magnetometer when robot is stationary (motors corrupt it heavily)
+        static float fusedHeading = 0.0f;
+        static bool initialized = false;
+        static float lastMagHeading = 0.0f;
+
+        if (!initialized) {
+            fusedHeading = magHeading;
+            lastMagHeading = magHeading;
+            initialized = true;
+        } else {
+            // Gyro integration
+            float dt = 1.0f / sensorRate;
+            float gyroHeadingDelta = gz * dt;
+
+            // Handle angle wrapping for fusion
+            float diff = magHeading - fusedHeading;
+            while (diff > 180.0f) diff -= 360.0f;
+            while (diff < -180.0f) diff += 360.0f;
+
+            // Detect motor activity by checking if gyro is showing significant rotation
+            // or if magnetometer is jumping around (interference indicator)
+            float magJump = fabs(magHeading - lastMagHeading);
+            if (magJump > 180.0f) magJump = 360.0f - magJump;  // Handle wrap
+            lastMagHeading = magHeading;
+
+            // Detect activity: gyro rotating OR magnetometer jumping suspiciously
+            bool motorsActive = (fabs(gz) > 5.0f) || (magJump > 10.0f);
+
+            // Only apply magnetometer correction when stationary
+            // When motors active: pure gyro integration (no mag correction)
+            // When stationary: slow mag correction (0.5% per update)
+            float magWeight = motorsActive ? 0.0f : 0.005f;
+
+            fusedHeading = fusedHeading + gyroHeadingDelta + magWeight * diff;
+
+            // Normalize
+            while (fusedHeading > 180.0f) fusedHeading -= 360.0f;
+            while (fusedHeading < -180.0f) fusedHeading += 360.0f;
+        }
+
+        heading = fusedHeading;
     }
 }
 

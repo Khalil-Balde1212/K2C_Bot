@@ -16,16 +16,16 @@ IMUInterface imu(20.0);
 // Kinematics
 FK odometry;
 
-// Control gains
-const float KP_HEADING = 2.5f;
-const float KI_HEADING = 0.1f;
-const float KD_HEADING = 0.05f;
+// Control gains (reduced to keep omega well below 0.5 rad/s PIVOT threshold)
+const float KP_HEADING = 500.0f;
+const float KI_HEADING = 0.0f;
+const float KD_HEADING = 0.0f;
 
 // State
 unsigned long lastTime = 0;
 unsigned long lastProcessTime = 0;
 float targetHeading = 0.0f;
-float desiredSpeed = 1.0f; // m/s
+float desiredSpeed = 0.2f; // m/s (default forward speed)
 
 // PID state
 float headingErrorIntegral = 0.0f;
@@ -36,13 +36,19 @@ float lastCmdVx = 0.0f;
 float lastCmdVy = 0.0f;
 float lastCmdOmega = 0.0f;
 
+// Encoder tracking for odometry
+int lastLeftCounts = 0;
+int lastRightCounts = 0;
+const float WHEEL_RADIUS = 0.00635f;  // meters (same as FK)
+const float COUNTS_PER_REV = 1440.0f;
+
 void setup() {
     Serial.begin(115200);
 
     // Init motors
     Motor::begin();
     leftMotor.setCPR(1440.0f).invertMotor(true);
-    rightMotor.setCPR(1440.0f);
+    rightMotor.setCPR(1440.0f).invertMotor(true);
     leftPivot.setCPR(2200.0f).invertEncoder(true);
     rightPivot.setCPR(2200.0f).invertEncoder(true);
 
@@ -68,7 +74,10 @@ void setup() {
         while (1);
     }
     imu.calibrateGyro(100);
-    
+
+    // Set magnetometer calibration (from magcal command)
+    imu.setMagCalibration(-33.50f, 16.50f, 6.50f, 1.067f, 1.087f, 0.875f);
+
     // Stabilize filter
     for (int i = 0; i < 100; i++) {
         imu.update();
@@ -78,6 +87,10 @@ void setup() {
 
     // Initialize FK at origin
     odometry.reset();
+
+    // Initialize encoder tracking
+    lastLeftCounts = *leftMotor.getCounts();
+    lastRightCounts = *rightMotor.getCounts();
 
     if (Serial) Serial.println("Ready!");
 }
@@ -99,22 +112,22 @@ int angleToSteeringPWM(float angle_rad) {
 // Execute motion using IK
 void executeMotion(float vx, float vy, float omega) {
     IK ik(vx, vy, omega);
-    
+
     // Store commanded velocities for FK
     lastCmdVx = vx;
     lastCmdVy = vy;
     lastCmdOmega = omega;
-    
+
     // Set steering
     leftPivot.setRawSpeed(angleToSteeringPWM(ik.theta_left));
     rightPivot.setRawSpeed(angleToSteeringPWM(ik.theta_right));
-    
-    // Set drive speeds
+
+    // Set drive speeds (right needs extra negation; left matches IK frame)
     float leftSpeed = (ik.wheel_speeds[0] + ik.wheel_speeds[2]) / 2.0f;
     float rightSpeed = (ik.wheel_speeds[1] + ik.wheel_speeds[3]) / 2.0f;
-    
+
     leftMotor.setRawSpeed(rpmToPWM(leftSpeed));
-    rightMotor.setRawSpeed(rpmToPWM(rightSpeed));
+    rightMotor.setRawSpeed(-rpmToPWM(rightSpeed));
 }
 
 // Normalize angle to [-180, 180]
@@ -137,17 +150,35 @@ void loop() {
     if (currentTime - lastProcessTime > 10) {
         float dt = (currentTime - lastProcessTime) / 1000.0f;
         lastProcessTime = currentTime;
+
+        // Get current encoder counts
+        int leftCounts = *leftMotor.getCounts();
+        int rightCounts = *rightMotor.getCounts();
+
+        // Compute delta counts since last update
+        int deltaLeft = leftCounts - lastLeftCounts;
+        int deltaRight = rightCounts - lastRightCounts;
+        lastLeftCounts = leftCounts;
+        lastRightCounts = rightCounts;
+
+        // Convert encoder counts to wheel displacement (meters)
+        float distPerCount = (2.0f * PI * WHEEL_RADIUS) / COUNTS_PER_REV;
+        float leftDist = deltaLeft * distPerCount;
+        float rightDist = deltaRight * distPerCount;
+
+        // Get steering angle from pivot encoder (approximate from left pivot)
+        // CPR for pivot is 2200, convert counts to radians
+        int pivotCounts = *leftPivot.getCounts();
+        float theta_s = (pivotCounts / 2200.0f) * 2.0f * PI;
+
+        // Build delta_s array [FL, FR, RL, RR] - using same displacement for front/rear
+        float delta_s[4] = {leftDist, rightDist, leftDist, rightDist};
+
+        // Update odometry from actual encoder measurements
+        odometry.updateFromEncoders(delta_s, theta_s, dt);
         
-        // Update odometry from commanded velocities
-        odometry.updateFromVelocities(lastCmdVx, lastCmdVy, lastCmdOmega, dt);
-        
-        // Get heading from odometry
-        float odomHeading = odometry.getHeading() * 57.2958f; // rad to deg
-        
-        // Fuse with IMU (trust IMU more since odometry is open-loop here)
-        float imuHeading = imu.getYaw();
-        float alpha = 0.2f; // Trust IMU 80%
-        float fusedHeading = alpha * odomHeading + (1.0f - alpha) * imuHeading;
+        // Use IMU heading directly (odometry fusion was causing issues)
+        float fusedHeading = imu.getYaw();
         
         // Compute heading error
         float headingError = normalizeAngle(targetHeading - fusedHeading);
@@ -160,16 +191,18 @@ void loop() {
         lastHeadingError = headingError;
         
         // Compute angular velocity command
-        float omega = (KP_HEADING * headingError + 
-                      KI_HEADING * headingErrorIntegral + 
-                      KD_HEADING * headingErrorDerivative) * (PI / 180.0f);
-        
-        // Limit omega
-        omega = constrain(omega, -1.0f, 1.0f);
-        
-        // Compute motion command
-        float vx = 0.0f;
-        float vy = desiredSpeed;
+        // Positive error (robot left of target) needs negative omega (turn right/CW)
+        // So omega = -K * error gives correct sign
+        float omega = -(KP_HEADING * headingError +
+                        KI_HEADING * headingErrorIntegral +
+                        KD_HEADING * headingErrorDerivative) * (PI / 180.0f);
+
+        // Limit omega to stay below PIVOT threshold (0.5 rad/s)
+        omega = constrain(omega, -0.4f, 0.4f);
+
+        // Move forward at desired speed while correcting heading
+        float vx = desiredSpeed;
+        float vy = 0.0f;
         
         // Execute motion
         executeMotion(vx, vy, omega);
@@ -203,7 +236,15 @@ void loop() {
             imu.calibrateOrientation();
             targetHeading = 0.0f;
             headingErrorIntegral = 0.0f;
+            lastLeftCounts = *leftMotor.getCounts();
+            lastRightCounts = *rightMotor.getCounts();
             Serial.println("Reset complete");
+        } else if (input == "magcal") {
+            // Stop motors during calibration
+            executeMotion(0, 0, 0);
+            imu.calibrateMagnetometer(15);  // 15 seconds to rotate robot
+            imu.calibrateOrientation();
+            Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
         }
     }
     
@@ -221,6 +262,12 @@ void loop() {
         Serial.print(odometry.getX(), 3);
         Serial.print(", ");
         Serial.print(odometry.getY(), 3);
+        Serial.print(") | Mag: (");
+        Serial.print(imu.getMx(), 1);
+        Serial.print(", ");
+        Serial.print(imu.getMy(), 1);
+        Serial.print(", ");
+        Serial.print(imu.getMz(), 1);
         Serial.println(")");
     }
 }

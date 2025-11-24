@@ -81,7 +81,9 @@ int* Motor::setRawSpeed(int speed) {
     return &currentRawSpeed;
 }
 
-
+int* Motor::getSpeed() const {
+    return (int*)&currentRawSpeed;
+}
 
 void Motor::updateCounts() {
     if (digitalRead(encA) == digitalRead(encB)) {
@@ -108,4 +110,9 @@ void Motor::coast(){
 void Motor::brake(){
     pwmDriver.setPWM(motorA, 0, 4096);
     pwmDriver.setPWM(motorB, 0, 4096);
+}
+
+
+const int* Motor::getCounts() const {
+    return &currentCounts;
 }

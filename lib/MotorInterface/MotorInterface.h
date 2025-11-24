@@ -14,7 +14,7 @@ public:
     Motor setCPR(float countsPerRevolution);
 
     int* setRawSpeed(int speed);
-    int getSpeed() const;
+    int* getSpeed() const;
     void coast();
     void brake();
 

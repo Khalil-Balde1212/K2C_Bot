@@ -47,6 +47,8 @@ private:
     bool invertedMotor;
     bool invertedEncoder;
 
+    int speed;
+
     float WheelDiameter; // inche
 };
 

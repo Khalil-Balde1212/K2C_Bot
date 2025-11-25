@@ -5,11 +5,11 @@
 #include "forward_kinematics/fk.h"
 
 // Motors: left/right drive, left/right steering
-Motor leftPivot(12, 13, 10, 9);
-Motor leftMotor(15, 14, 3, 4);
+Motor leftMotor(12, 13, 2, 7);
+Motor leftPivot(15, 14, 11, 8);
 
-Motor rightMotor(7, 6, 11, 8);
-Motor rightPivot(5, 4, 2, 7);
+Motor rightMotor(5, 4, 3, 4);
+Motor rightPivot(7, 6, 10, 9); 
 
 
 // Sensors
@@ -55,11 +55,11 @@ void setup() {
     // Init motors
     Serial.println("Initializing motors...");
     Motor::begin();
-    leftMotor.setCPR(1440.0f).invertMotor(true);   // FIXED: invertMotor for drive motors
-    rightMotor.setCPR(1440.0f).invertMotor(true);  // FIXED: invertMotor for drive motors
+    leftMotor.setCPR(2200.0f).invertMotor(true);
+    rightMotor.setCPR(2200.0f).invertMotor(true);
 
-    leftPivot.setCPR(2200.0f).invertEncoder(true);
-    rightPivot.setCPR(2200.0f).invertEncoder(true);
+    leftPivot.setCPR(1440.0f);
+    rightPivot.setCPR(1440.0f);
 
     // Encoder interrupts
     attachInterrupt(digitalPinToInterrupt(leftMotor.encA),
@@ -237,87 +237,69 @@ void loop() {
     if (Serial.available() > 0) {
         String input = Serial.readStringUntil('\n');
         input.trim();
-
-        if (input == "direct") {
-            directControlMode = true;
-            leftMotor.setRawSpeed(0);
-            rightMotor.setRawSpeed(0);
-            leftPivot.setRawSpeed(0);
-            rightPivot.setRawSpeed(0);
-            Serial.println("Direct control mode ON. Use: lm/rm/lp/rp <pwm>");
-        } else if (input == "auto") {
-            directControlMode = false;
-            Serial.println("Automatic control mode ON");
-        } else if (input.startsWith("lm")) {
-            int pwm = input.substring(2).toInt();
-            leftMotor.setRawSpeed(pwm);
-            Serial.print("Left motor PWM: ");
-            Serial.println(pwm);
-        } else if (input.startsWith("rm")) {
-            int pwm = input.substring(2).toInt();
-            rightMotor.setRawSpeed(pwm);
-            Serial.print("Right motor PWM: ");
-            Serial.println(pwm);
-        } else if (input.startsWith("lp")) {
-            int pwm = input.substring(2).toInt();
-            leftPivot.setRawSpeed(pwm);
-            Serial.print("Left pivot PWM: ");
-            Serial.println(pwm);
-        } else if (input.startsWith("rp")) {
-            int pwm = input.substring(2).toInt();
-            rightPivot.setRawSpeed(pwm);
-            Serial.print("Right pivot PWM: ");
-            Serial.println(pwm);
-        } else if (input == "quiet") {
-            quietMode = !quietMode;
-            Serial.print("Quiet mode: ");
-            Serial.println(quietMode ? "ON" : "OFF");
-        } else if (input == "status") {
-            Serial.print("LM enc: ");
-            Serial.print(*leftMotor.getCounts());
-            Serial.print(" | RM enc: ");
-            Serial.print(*rightMotor.getCounts());
-            Serial.print(" | LP enc: ");
-            Serial.print(*leftPivot.getCounts());
-            Serial.print(" | RP enc: ");
-            Serial.print(*rightPivot.getCounts());
-            Serial.print(" | IMU: ");
-            Serial.println(imuAvailable ? "OK" : "N/A");
-        } else if (input.startsWith("h")) {
+        
+        switch (input.charAt(0)) {
+            case 'h': {
             targetHeading = input.substring(1).toFloat();
             headingErrorIntegral = 0.0f;
             Serial.print("Target heading: ");
             Serial.println(targetHeading);
-        } else if (input.startsWith("v")) {
+            break;
+            }
+            case 'v': {
             desiredSpeed = input.substring(1).toFloat();
             Serial.print("Speed: ");
             Serial.println(desiredSpeed);
-        } else if (input == "stop") {
-            desiredSpeed = 0.0f;
-            leftMotor.setRawSpeed(0);
-            rightMotor.setRawSpeed(0);
-            leftPivot.setRawSpeed(0);
-            rightPivot.setRawSpeed(0);
-            Serial.println("All motors stopped");
-        } else if (input == "reset") {
-            odometry.reset();
-            if (imuAvailable) imu.calibrateOrientation();
-            targetHeading = 0.0f;
-            headingErrorIntegral = 0.0f;
-            lastLeftCounts = *leftMotor.getCounts();
-            lastRightCounts = *rightMotor.getCounts();
-            Serial.println("Reset complete");
-        } else if (input == "magcal") {
-            if (!imuAvailable) {
-                Serial.println("ERROR: IMU not available");
-            } else {
-                leftMotor.setRawSpeed(0);
-                rightMotor.setRawSpeed(0);
-                leftPivot.setRawSpeed(0);
-                rightPivot.setRawSpeed(0);
-                imu.calibrateMagnetometer(15);
+            break;
+            }
+            case 'l': {
+                desiredSpeed = input.substring(1).toFloat();
+                leftMotor.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Left Motor Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            case 'r': {
+                desiredSpeed = input.substring(1).toFloat();
+                rightMotor.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Right Motor Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            case 'p': {
+                desiredSpeed = input.substring(1).toFloat();
+                leftPivot.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Pivot Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            case 'q': {
+                desiredSpeed = input.substring(1).toFloat();
+                rightPivot.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Right Pivot Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            default: {
+            if (input == "stop") {
+                desiredSpeed = 0.0f;
+                executeMotion(0, 0, 0);
+            } else if (input == "reset") {
+                odometry.reset();
+                imu.calibrateOrientation();
+                targetHeading = 0.0f;
+                headingErrorIntegral = 0.0f;
+                lastLeftCounts = *leftMotor.getCounts();
+                lastRightCounts = *rightMotor.getCounts();
+                Serial.println("Reset complete");
+            } else if (input == "magcal") {
+                // Stop motors during calibration
+                executeMotion(0, 0, 0);
+                imu.calibrateMagnetometer(15);  // 15 seconds to rotate robot
                 imu.calibrateOrientation();
                 Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
+            }
+            break;
             }
         }
     }
@@ -326,30 +308,31 @@ void loop() {
     static unsigned long lastPrint = 0;
     if (!quietMode && Serial && currentTime - lastPrint > 100) {
         lastPrint = currentTime;
-        Serial.print("Target: ");
-        Serial.print(targetHeading, 1);
-        Serial.print("° | ");
-        if (imuAvailable) {
-            Serial.print("IMU: ");
-            Serial.print(imu.getYaw(), 1);
-            Serial.print("° | Err: ");
-            Serial.print(lastHeadingError, 1);
-            Serial.print("° | ");
-        }
-        Serial.print("Pos: (");
-        Serial.print(odometry.getX(), 3);
-        Serial.print(", ");
-        Serial.print(odometry.getY(), 3);
-        Serial.print(")");
-        if (imuAvailable) {
-            Serial.print(" | Mag: (");
-            Serial.print(imu.getMx(), 1);
-            Serial.print(", ");
-            Serial.print(imu.getMy(), 1);
-            Serial.print(", ");
-            Serial.print(imu.getMz(), 1);
-            Serial.print(")");
-        }
-        Serial.println();
+        // Serial.print("Target: ");
+        // Serial.print(targetHeading, 1);
+        // Serial.print("° | IMU: ");
+        // Serial.print(imu.getYaw(), 1);
+        // Serial.print("° | Err: ");
+        // Serial.print(lastHeadingError, 1);
+        // Serial.print("° | Pos: (");
+        // Serial.print(odometry.getX(), 3);
+        // Serial.print(", ");
+        // Serial.print(odometry.getY(), 3);
+        // Serial.print(") | Mag: (");
+        // Serial.print(imu.getMx(), 1);
+        // Serial.print(", ");
+        // Serial.print(imu.getMy(), 1);
+        // Serial.print(", ");
+        // Serial.print(imu.getMz(), 1);
+        // Serial.println(")");
+    
+        Serial.print("Left Counts:\t");
+        Serial.print(*leftMotor.getCounts());
+        Serial.print(" | Right Counts:\t");
+        Serial.print(*rightMotor.getCounts());
+        Serial.print(" | LeftP Counts:\t");
+        Serial.print(*leftPivot.getCounts());
+        Serial.print(" | RightP Counts:\t");
+        Serial.println(*rightPivot.getCounts());
     }
 }

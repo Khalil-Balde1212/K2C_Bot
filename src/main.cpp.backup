@@ -5,16 +5,15 @@
 #include "forward_kinematics/fk.h"
 
 // Motors: left/right drive, left/right steering
-Motor leftPivot(12, 13, 10, 9);
-Motor leftMotor(15, 14, 3, 4);
+Motor leftMotor(12, 13, 10, 9);
+Motor leftPivot(15, 14, 3, 4);
 
 Motor rightMotor(7, 6, 11, 8);
-Motor rightPivot(5, 4, 2, 7);
+Motor rightPivot(5, 4, 2, 7); 
 
 
 // Sensors
 IMUInterface imu(20.0);
-bool imuAvailable = false; // Track if IMU initialized successfully
 
 // Kinematics
 FK odometry;
@@ -28,8 +27,8 @@ const float KD_HEADING = 0.0f;
 unsigned long lastTime = 0;
 unsigned long lastProcessTime = 0;
 float targetHeading = 0.0f;
-float desiredSpeed = 0.2f; // m/s (reduced from 5.0 to reasonable speed)
-bool quietMode = false; // Enable debug output by default
+float desiredSpeed = 5.0f; // m/s (default forward speed)
+bool quietMode = true; // Disable constant debug output
 bool directControlMode = false; // Direct motor control for testing
 
 // PID state
@@ -50,25 +49,23 @@ const float COUNTS_PER_REV = 1440.0f;
 void setup() {
     Serial.begin(115200);
     delay(2000);
-    Serial.println("=== K2C_Bot Starting ===");
 
     // Init motors
-    Serial.println("Initializing motors...");
     Motor::begin();
-    leftMotor.setCPR(1440.0f).invertMotor(true);   // FIXED: invertMotor for drive motors
-    rightMotor.setCPR(1440.0f).invertMotor(true);  // FIXED: invertMotor for drive motors
+    leftMotor.setCPR(1440.0f).invertEncoder(true);
+    rightMotor.setCPR(1440.0f).invertEncoder(true);
 
     leftPivot.setCPR(2200.0f).invertEncoder(true);
     rightPivot.setCPR(2200.0f).invertEncoder(true);
 
     // Encoder interrupts
-    attachInterrupt(digitalPinToInterrupt(leftMotor.encA),
+    attachInterrupt(digitalPinToInterrupt(leftMotor.encA), 
                     []() { leftMotor.updateCounts(); }, RISING);
-    attachInterrupt(digitalPinToInterrupt(rightMotor.encA),
+    attachInterrupt(digitalPinToInterrupt(rightMotor.encA), 
                     []() { rightMotor.updateCounts(); }, RISING);
-    attachInterrupt(digitalPinToInterrupt(leftPivot.encA),
+    attachInterrupt(digitalPinToInterrupt(leftPivot.encA), 
                     []() { leftPivot.updateCounts(); }, RISING);
-    attachInterrupt(digitalPinToInterrupt(rightPivot.encA),
+    attachInterrupt(digitalPinToInterrupt(rightPivot.encA), 
                     []() { rightPivot.updateCounts(); }, RISING);
 
     // Stop all
@@ -76,29 +73,23 @@ void setup() {
     rightMotor.setRawSpeed(0);
     leftPivot.setRawSpeed(0);
     rightPivot.setRawSpeed(0);
-    Serial.println("Motors initialized!");
 
-    // Init IMU (FIXED: non-blocking, continues even if IMU fails)
-    Serial.println("Initializing IMU...");
+    // Init IMU
     if (!imu.begin()) {
-        Serial.println("WARNING: IMU init failed! Continuing without IMU.");
-        imuAvailable = false;
-    } else {
-        Serial.println("IMU initialized, calibrating...");
-        imu.calibrateGyro(100);
-
-        // Set magnetometer calibration (from magcal command)
-        imu.setMagCalibration(-33.50f, 16.50f, 6.50f, 1.067f, 1.087f, 0.875f);
-
-        // Stabilize filter
-        for (int i = 0; i < 100; i++) {
-            imu.update();
-            delay(10);
-        }
-        imu.calibrateOrientation();
-        imuAvailable = true;
-        Serial.println("IMU calibrated!");
+        if (Serial) Serial.println("IMU init failed!");
+        while (1);
     }
+    imu.calibrateGyro(100);
+
+    // Set magnetometer calibration (from magcal command)
+    imu.setMagCalibration(-33.50f, 16.50f, 6.50f, 1.067f, 1.087f, 0.875f);
+
+    // Stabilize filter
+    for (int i = 0; i < 100; i++) {
+        imu.update();
+        delay(10);
+    }
+    imu.calibrateOrientation();
 
     // Initialize FK at origin
     odometry.reset();
@@ -107,8 +98,7 @@ void setup() {
     lastLeftCounts = *leftMotor.getCounts();
     lastRightCounts = *rightMotor.getCounts();
 
-    Serial.println("=== Ready! ===");
-    Serial.println("Commands: direct, auto, lm/rm/lp/rp <pwm>, stop, quiet, status, v<speed>, h<heading>");
+    if (Serial) Serial.println("Ready!");
 }
 
 // RPM to PWM
@@ -155,13 +145,13 @@ float normalizeAngle(float angle) {
 
 void loop() {
     unsigned long currentTime = millis();
-
-    // Update IMU at 20Hz (only if available)
-    if (imuAvailable && currentTime - lastTime > 50) {
+    
+    // Update IMU at 20Hz
+    if (currentTime - lastTime > 50) {
         lastTime = currentTime;
         imu.update();
     }
-
+    
     // Control loop at 100Hz
     if (currentTime - lastProcessTime > 10) {
         float dt = (currentTime - lastProcessTime) / 1000.0f;
@@ -195,8 +185,8 @@ void loop() {
             // Update odometry from actual encoder measurements
             odometry.updateFromEncoders(delta_s, theta_s, dt);
 
-            // Use IMU heading if available, otherwise assume no heading drift (0 degrees)
-            float fusedHeading = imuAvailable ? imu.getYaw() : 0.0f;
+            // Use IMU heading directly (odometry fusion was causing issues)
+            float fusedHeading = imu.getYaw();
 
             // Compute heading error
             float headingError = normalizeAngle(targetHeading - fusedHeading);
@@ -232,7 +222,7 @@ void loop() {
         leftPivot.update(lastProcessTime, currentTime);
         rightPivot.update(lastProcessTime, currentTime);
     }
-
+    
     // Serial commands
     if (Serial.available() > 0) {
         String input = Serial.readStringUntil('\n');
@@ -280,9 +270,7 @@ void loop() {
             Serial.print(" | LP enc: ");
             Serial.print(*leftPivot.getCounts());
             Serial.print(" | RP enc: ");
-            Serial.print(*rightPivot.getCounts());
-            Serial.print(" | IMU: ");
-            Serial.println(imuAvailable ? "OK" : "N/A");
+            Serial.println(*rightPivot.getCounts());
         } else if (input.startsWith("h")) {
             targetHeading = input.substring(1).toFloat();
             headingErrorIntegral = 0.0f;
@@ -301,55 +289,43 @@ void loop() {
             Serial.println("All motors stopped");
         } else if (input == "reset") {
             odometry.reset();
-            if (imuAvailable) imu.calibrateOrientation();
+            imu.calibrateOrientation();
             targetHeading = 0.0f;
             headingErrorIntegral = 0.0f;
             lastLeftCounts = *leftMotor.getCounts();
             lastRightCounts = *rightMotor.getCounts();
             Serial.println("Reset complete");
         } else if (input == "magcal") {
-            if (!imuAvailable) {
-                Serial.println("ERROR: IMU not available");
-            } else {
-                leftMotor.setRawSpeed(0);
-                rightMotor.setRawSpeed(0);
-                leftPivot.setRawSpeed(0);
-                rightPivot.setRawSpeed(0);
-                imu.calibrateMagnetometer(15);
-                imu.calibrateOrientation();
-                Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
-            }
+            leftMotor.setRawSpeed(0);
+            rightMotor.setRawSpeed(0);
+            leftPivot.setRawSpeed(0);
+            rightPivot.setRawSpeed(0);
+            imu.calibrateMagnetometer(15);
+            imu.calibrateOrientation();
+            Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
         }
     }
-
+    
     // Debug output at 10Hz (only if not in quiet mode)
     static unsigned long lastPrint = 0;
     if (!quietMode && Serial && currentTime - lastPrint > 100) {
         lastPrint = currentTime;
         Serial.print("Target: ");
         Serial.print(targetHeading, 1);
-        Serial.print("° | ");
-        if (imuAvailable) {
-            Serial.print("IMU: ");
-            Serial.print(imu.getYaw(), 1);
-            Serial.print("° | Err: ");
-            Serial.print(lastHeadingError, 1);
-            Serial.print("° | ");
-        }
-        Serial.print("Pos: (");
+        Serial.print("° | IMU: ");
+        Serial.print(imu.getYaw(), 1);
+        Serial.print("° | Err: ");
+        Serial.print(lastHeadingError, 1);
+        Serial.print("° | Pos: (");
         Serial.print(odometry.getX(), 3);
         Serial.print(", ");
         Serial.print(odometry.getY(), 3);
-        Serial.print(")");
-        if (imuAvailable) {
-            Serial.print(" | Mag: (");
-            Serial.print(imu.getMx(), 1);
-            Serial.print(", ");
-            Serial.print(imu.getMy(), 1);
-            Serial.print(", ");
-            Serial.print(imu.getMz(), 1);
-            Serial.print(")");
-        }
-        Serial.println();
+        Serial.print(") | Mag: (");
+        Serial.print(imu.getMx(), 1);
+        Serial.print(", ");
+        Serial.print(imu.getMy(), 1);
+        Serial.print(", ");
+        Serial.print(imu.getMz(), 1);
+        Serial.println(")");
     }
 }

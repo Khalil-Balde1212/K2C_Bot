@@ -5,11 +5,11 @@
 #include "forward_kinematics/fk.h"
 
 // Motors: left/right drive, left/right steering
-Motor leftMotor(12, 13, 10, 9);
-Motor leftPivot(15, 14, 3, 4);
+Motor leftMotor(12, 13, 2, 7);
+Motor leftPivot(15, 14, 11, 8);
 
-Motor rightMotor(7, 6, 11, 8);
-Motor rightPivot(5, 4, 2, 7); 
+Motor rightMotor(5, 4, 3, 4);
+Motor rightPivot(7, 6, 10, 9); 
 
 
 // Sensors
@@ -50,11 +50,11 @@ void setup() {
 
     // Init motors
     Motor::begin();
-    leftMotor.setCPR(1440.0f).invertEncoder(true);
-    rightMotor.setCPR(1440.0f).invertEncoder(true);
+    leftMotor.setCPR(2200.0f).invertMotor(true);
+    rightMotor.setCPR(2200.0f).invertMotor(true);
 
-    leftPivot.setCPR(2200.0f).invertEncoder(true);
-    rightPivot.setCPR(2200.0f).invertEncoder(true);
+    leftPivot.setCPR(1440.0f);
+    rightPivot.setCPR(1440.0f);
 
     // Encoder interrupts
     attachInterrupt(digitalPinToInterrupt(leftMotor.encA), 
@@ -144,111 +144,148 @@ float normalizeAngle(float angle) {
 void loop() {
     unsigned long currentTime = millis();
     
-    // Update IMU at 20Hz
-    if (currentTime - lastTime > 50) {
-        lastTime = currentTime;
-        imu.update();
-    }
+    // // Update IMU at 20Hz
+    // if (currentTime - lastTime > 50) {
+    //     lastTime = currentTime;
+    //     imu.update();
+    // }
     
-    // Control loop at 100Hz
-    if (currentTime - lastProcessTime > 10) {
-        float dt = (currentTime - lastProcessTime) / 1000.0f;
-        lastProcessTime = currentTime;
+    // // Control loop at 100Hz
+    // if (currentTime - lastProcessTime > 10) {
+    //     float dt = (currentTime - lastProcessTime) / 1000.0f;
+    //     lastProcessTime = currentTime;
 
-        // Get current encoder counts
-        int leftCounts = *leftMotor.getCounts();
-        int rightCounts = *rightMotor.getCounts();
+    //     // Get current encoder counts
+    //     int leftCounts = *leftMotor.getCounts();
+    //     int rightCounts = *rightMotor.getCounts();
 
-        // Compute delta counts since last update
-        int deltaLeft = leftCounts - lastLeftCounts;
-        int deltaRight = rightCounts - lastRightCounts;
-        lastLeftCounts = leftCounts;
-        lastRightCounts = rightCounts;
+    //     // Compute delta counts since last update
+    //     int deltaLeft = leftCounts - lastLeftCounts;
+    //     int deltaRight = rightCounts - lastRightCounts;
+    //     lastLeftCounts = leftCounts;
+    //     lastRightCounts = rightCounts;
 
-        // Convert encoder counts to wheel displacement (meters)
-        float distPerCount = (2.0f * PI * WHEEL_RADIUS) / COUNTS_PER_REV;
-        float leftDist = deltaLeft * distPerCount;
-        float rightDist = deltaRight * distPerCount;
+    //     // Convert encoder counts to wheel displacement (meters)
+    //     float distPerCount = (2.0f * PI * WHEEL_RADIUS) / COUNTS_PER_REV;
+    //     float leftDist = deltaLeft * distPerCount;
+    //     float rightDist = deltaRight * distPerCount;
 
-        // Get steering angle from pivot encoder (approximate from left pivot)
-        // CPR for pivot is 2200, convert counts to radians
-        int pivotCounts = *leftPivot.getCounts();
-        float theta_s = (pivotCounts / 2200.0f) * 2.0f * PI;
+    //     // Get steering angle from pivot encoder (approximate from left pivot)
+    //     // CPR for pivot is 2200, convert counts to radians
+    //     int pivotCounts = *leftPivot.getCounts();
+    //     float theta_s = (pivotCounts / 2200.0f) * 2.0f * PI;
 
-        // Build delta_s array [FL, FR, RL, RR] - using same displacement for front/rear
-        float delta_s[4] = {leftDist, rightDist, leftDist, rightDist};
+    //     // Build delta_s array [FL, FR, RL, RR] - using same displacement for front/rear
+    //     float delta_s[4] = {leftDist, rightDist, leftDist, rightDist};
 
-        // Update odometry from actual encoder measurements
-        odometry.updateFromEncoders(delta_s, theta_s, dt);
+    //     // Update odometry from actual encoder measurements
+    //     odometry.updateFromEncoders(delta_s, theta_s, dt);
         
-        // Use IMU heading directly (odometry fusion was causing issues)
-        float fusedHeading = imu.getYaw();
+    //     // Use IMU heading directly (odometry fusion was causing issues)
+    //     float fusedHeading = imu.getYaw();
         
-        // Compute heading error
-        float headingError = normalizeAngle(targetHeading - fusedHeading);
+    //     // Compute heading error
+    //     float headingError = normalizeAngle(targetHeading - fusedHeading);
         
-        // PID control for heading
-        headingErrorIntegral += headingError * dt;
-        headingErrorIntegral = constrain(headingErrorIntegral, -10.0f, 10.0f);
+    //     // PID control for heading
+    //     headingErrorIntegral += headingError * dt;
+    //     headingErrorIntegral = constrain(headingErrorIntegral, -10.0f, 10.0f);
         
-        float headingErrorDerivative = (headingError - lastHeadingError) / dt;
-        lastHeadingError = headingError;
+    //     float headingErrorDerivative = (headingError - lastHeadingError) / dt;
+    //     lastHeadingError = headingError;
         
-        // Compute angular velocity command
-        // Positive error (robot left of target) needs negative omega (turn right/CW)
-        // So omega = -K * error gives correct sign
-        float omega = -(KP_HEADING * headingError +
-                        KI_HEADING * headingErrorIntegral +
-                        KD_HEADING * headingErrorDerivative) * (PI / 180.0f);
+    //     // Compute angular velocity command
+    //     // Positive error (robot left of target) needs negative omega (turn right/CW)
+    //     // So omega = -K * error gives correct sign
+    //     float omega = -(KP_HEADING * headingError +
+    //                     KI_HEADING * headingErrorIntegral +
+    //                     KD_HEADING * headingErrorDerivative) * (PI / 180.0f);
 
-        // Limit omega to stay below PIVOT threshold (0.5 rad/s)
-        omega = constrain(omega, -0.4f, 0.4f);
+    //     // Limit omega to stay below PIVOT threshold (0.5 rad/s)
+    //     omega = constrain(omega, -0.4f, 0.4f);
 
-        // Move forward at desired speed while correcting heading
-        float vx = desiredSpeed;
-        float vy = 0.0f;
+    //     // Move forward at desired speed while correcting heading
+    //     float vx = desiredSpeed;
+    //     float vy = 0.0f;
         
-        // Execute motion
-        executeMotion(vx, vy, omega);
+    //     // Execute motion
+    //     executeMotion(vx, vy, omega);
         
-        // Update motors
+    //     // Update motors
         leftMotor.update(lastProcessTime, currentTime);
         rightMotor.update(lastProcessTime, currentTime);
         leftPivot.update(lastProcessTime, currentTime);
         rightPivot.update(lastProcessTime, currentTime);
-    }
+    // }
     
     // Serial commands
     if (Serial.available() > 0) {
         String input = Serial.readStringUntil('\n');
         input.trim();
         
-        if (input.startsWith("h")) {
+        switch (input.charAt(0)) {
+            case 'h': {
             targetHeading = input.substring(1).toFloat();
             headingErrorIntegral = 0.0f;
             Serial.print("Target heading: ");
             Serial.println(targetHeading);
-        } else if (input.startsWith("v")) {
+            break;
+            }
+            case 'v': {
             desiredSpeed = input.substring(1).toFloat();
             Serial.print("Speed: ");
             Serial.println(desiredSpeed);
-        } else if (input == "stop") {
-            desiredSpeed = 0.0f;
-            executeMotion(0, 0, 0);
-        } else if (input == "reset") {
-            odometry.reset();
-            imu.calibrateOrientation();
-            targetHeading = 0.0f;
-            headingErrorIntegral = 0.0f;
-            lastLeftCounts = *leftMotor.getCounts();
-            lastRightCounts = *rightMotor.getCounts();
-            Serial.println("Reset complete");
-        } else if (input == "magcal") {
-            // Stop motors during calibration
-            executeMotion(0, 0, 0);
-            imu.calibrateMagnetometer(15);  // 15 seconds to rotate robot
-            imu.calibrateOrientation();
-            Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
+            break;
+            }
+            case 'l': {
+                desiredSpeed = input.substring(1).toFloat();
+                leftMotor.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Left Motor Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            case 'r': {
+                desiredSpeed = input.substring(1).toFloat();
+                rightMotor.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Right Motor Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            case 'p': {
+                desiredSpeed = input.substring(1).toFloat();
+                leftPivot.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Pivot Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            case 'q': {
+                desiredSpeed = input.substring(1).toFloat();
+                rightPivot.setRawSpeed(desiredSpeed*4095);
+                Serial.print("Right Pivot Speed: ");
+                Serial.println(desiredSpeed);
+                break;
+            }
+            default: {
+            if (input == "stop") {
+                desiredSpeed = 0.0f;
+                executeMotion(0, 0, 0);
+            } else if (input == "reset") {
+                odometry.reset();
+                imu.calibrateOrientation();
+                targetHeading = 0.0f;
+                headingErrorIntegral = 0.0f;
+                lastLeftCounts = *leftMotor.getCounts();
+                lastRightCounts = *rightMotor.getCounts();
+                Serial.println("Reset complete");
+            } else if (input == "magcal") {
+                // Stop motors during calibration
+                executeMotion(0, 0, 0);
+                imu.calibrateMagnetometer(15);  // 15 seconds to rotate robot
+                imu.calibrateOrientation();
+                Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
+            }
+            break;
+            }
         }
     }
     
@@ -256,22 +293,31 @@ void loop() {
     static unsigned long lastPrint = 0;
     if (Serial && currentTime - lastPrint > 1000) {
         lastPrint = currentTime;
-        Serial.print("Target: ");
-        Serial.print(targetHeading, 1);
-        Serial.print("° | IMU: ");
-        Serial.print(imu.getYaw(), 1);
-        Serial.print("° | Err: ");
-        Serial.print(lastHeadingError, 1);
-        Serial.print("° | Pos: (");
-        Serial.print(odometry.getX(), 3);
-        Serial.print(", ");
-        Serial.print(odometry.getY(), 3);
-        Serial.print(") | Mag: (");
-        Serial.print(imu.getMx(), 1);
-        Serial.print(", ");
-        Serial.print(imu.getMy(), 1);
-        Serial.print(", ");
-        Serial.print(imu.getMz(), 1);
-        Serial.println(")");
+        // Serial.print("Target: ");
+        // Serial.print(targetHeading, 1);
+        // Serial.print("° | IMU: ");
+        // Serial.print(imu.getYaw(), 1);
+        // Serial.print("° | Err: ");
+        // Serial.print(lastHeadingError, 1);
+        // Serial.print("° | Pos: (");
+        // Serial.print(odometry.getX(), 3);
+        // Serial.print(", ");
+        // Serial.print(odometry.getY(), 3);
+        // Serial.print(") | Mag: (");
+        // Serial.print(imu.getMx(), 1);
+        // Serial.print(", ");
+        // Serial.print(imu.getMy(), 1);
+        // Serial.print(", ");
+        // Serial.print(imu.getMz(), 1);
+        // Serial.println(")");
+    
+        Serial.print("Left Counts:\t");
+        Serial.print(*leftMotor.getCounts());
+        Serial.print(" | Right Counts:\t");
+        Serial.print(*rightMotor.getCounts());
+        Serial.print(" | LeftP Counts:\t");
+        Serial.print(*leftPivot.getCounts());
+        Serial.print(" | RightP Counts:\t");
+        Serial.println(*rightPivot.getCounts());
     }
 }

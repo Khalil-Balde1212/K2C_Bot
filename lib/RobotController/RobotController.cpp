@@ -74,8 +74,8 @@ RobotController::RobotController(Motor *lm, Motor *rm, Motor *lp, Motor *rp)
 
     // Initialize PID controllers with reasonable defaults
     // Drive motors: Speed PID (RPM control)
-    leftDrivePID.setGains(1.0f, 0.0f, 0.00f);
-    rightDrivePID.setGains(1.0f, 0.0f, 0.00f);
+    leftDrivePID.setGains(10.0f, 0.0f, 0.0f);
+    rightDrivePID.setGains(10.0f, 0.0f, 0.0f);
 
     // Pivot motors: Position PID (angle control) - tuned for position control
     leftPivotPID.setGains(15000.0f, 10.0f, 50.0f);
@@ -91,12 +91,12 @@ bool RobotController::begin()
     }
 
     // Configure motors (basic setup, detailed config done in main)
-    this->leftMotor->setCPR(2200.0f).invertMotor(true);
-    this->rightMotor->setCPR(2200.0f).invertEncoder(true);
+    this->leftMotor->setCPR(COUNTS_PER_REV_DRIVE).invertMotor(true);
+    this->rightMotor->setCPR(COUNTS_PER_REV_DRIVE).invertEncoder(true);
     this->rightMotor->invertMotor(true);
 
-    this->leftPivot->setCPR(1440.0f);
-    this->rightPivot->setCPR(1440.0f);  
+    this->leftPivot->setCPR(COUNTS_PER_REV_PIVOT);
+    this->rightPivot->setCPR(COUNTS_PER_REV_PIVOT);  
     this->leftPivot->invertEncoder(true);
     this->rightPivot->invertEncoder(true);
     // Stop all motors initially
@@ -105,25 +105,6 @@ bool RobotController::begin()
     initialized = true;
     Serial.println("RobotController initialized successfully");
     return true;
-}
-
-void RobotController::setVelocity(float vx, float vy, float omega)
-{
-    if (!initialized)
-        return;
-
-    // Use inverse kinematics to convert velocity commands to wheel speeds and steering angles
-    IK ik(vx, vy, omega);
-
-    // Set steering angles (convert to radians, assuming IK outputs are in radians)
-    setSteeringAngles(ik.theta_left, ik.theta_right);
-
-    // Set wheel speeds (convert to RPM)
-    // Average front and rear wheels for each side
-    float leftRPM = (ik.wheel_speeds[0] + ik.wheel_speeds[2]) / 2.0f;
-    float rightRPM = (ik.wheel_speeds[1] + ik.wheel_speeds[3]) / 2.0f;
-
-    setWheelSpeeds(leftRPM, -rightRPM); // Right side needs negation
 }
 
 void RobotController::setWheelSpeeds(float leftRPM, float rightRPM)

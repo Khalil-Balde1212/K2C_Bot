@@ -2,8 +2,6 @@
 #include <MotorInterface.h>
 #include <SensorInterface.h>
 #include <RobotController.h>
-#include "inverse_kinematics.h"
-#include "fk.h"
 
 // Motors: left/right drive, left/right steering
 Motor leftMotor(12, 13, 2, 7);
@@ -21,9 +19,6 @@ bool imuAvailable = false; // Track if IMU initialized successfully
 
 TOF::TOFSensors tofSensors;
 
-// Kinematics
-FK odometry;
-
 // Control gains (reduced to keep omega well below 0.5 rad/s PIVOT threshold)
 const float KP_HEADING = 2000.0f;
 const float KI_HEADING = 0.0f;
@@ -38,11 +33,6 @@ bool quietMode = false;    // Enable debug output by default
 // PID state
 float headingErrorIntegral = 0.0f;
 float lastHeadingError = 0.0f;
-
-// Store commanded velocities for FK
-float lastCmdVx = 0.0f;
-float lastCmdVy = 0.0f;
-float lastCmdOmega = 0.0f;
 
 // Encoder tracking for odometry
 int lastLeftCounts = 0;
@@ -111,9 +101,6 @@ void setup()
         Serial.println("IMU calibrated!");
     }
 
-    // Initialize FK at origin
-    odometry.reset();
-
     // Initialize encoder tracking
     lastLeftCounts = *leftMotor.getCounts();
     lastRightCounts = *rightMotor.getCounts();
@@ -139,17 +126,6 @@ void setup()
 
     Serial.println("=== Ready! ===");
     Serial.println("Commands: v<speed>, h<heading>, l<rpm>, r<rpm>, p<angle_deg>, q<angle_deg>, al<angle>, ar<angle>, stop, reset, magcal, pivotzero, pivotreset, status");
-}
-
-// Execute motion using Robot Controller
-void executeMotion(float vx, float vy, float omega)
-{
-    robot.setVelocity(vx, vy, omega);
-
-    // Store commanded velocities for FK
-    lastCmdVx = vx;
-    lastCmdVy = vy;
-    lastCmdOmega = omega;
 }
 
 // Normalize angle to [-180, 180]
@@ -192,6 +168,8 @@ void loop()
             desiredSpeed = input.substring(1).toFloat();
             Serial.print("Speed: ");
             Serial.println(desiredSpeed);
+
+            robot.setWheelSpeeds(desiredSpeed, desiredSpeed);
             break;
         }
         case 'a':
@@ -245,7 +223,6 @@ void loop()
             }
             else if (input == "reset")
             {
-                odometry.reset();
                 imu.calibrateOrientation();
                 imu.resetBiasEstimation();
                 robot.stop();
@@ -318,7 +295,7 @@ void loop()
         // Serial.print(*leftPivot.getSpeed());
         // Serial.print(" | rightPivot Speed:\t");
         // Serial.print(*rightPivot.getSpeed());
-        // Serial.println();
+        Serial.println();
         // Update last time for next iteration
     }
 

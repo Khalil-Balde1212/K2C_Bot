@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 #include <MotorInterface.h>
-#include "inverse_kinematics.h"
 
 // PID Controller class
 class PIDController {
@@ -44,7 +43,7 @@ private:
     // Motor configuration
     const float WHEEL_RADIUS = 0.00635f;  // meters
     const float COUNTS_PER_REV_DRIVE = 2200.0f;
-    const float COUNTS_PER_REV_PIVOT = 1440.0f;
+    const float COUNTS_PER_REV_PIVOT = 1800.0f;
     const float MAX_RPM = 100.0f;
 
     // State tracking
@@ -65,7 +64,6 @@ public:
     bool begin();
 
     // High-level motion control
-    void setVelocity(float vx, float vy, float omega);  // m/s, m/s, rad/s
     void setWheelSpeeds(float leftRPM, float rightRPM);  // Direct RPM control
     void setSteeringAngles(float leftAngle, float rightAngle);  // radians
 

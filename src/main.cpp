@@ -19,10 +19,10 @@ bool imuAvailable = false; // Track if IMU initialized successfully
 
 TOF::TOFSensors tofSensors;
 
-// Control gains (reduced to keep omega well below 0.5 rad/s PIVOT threshold)
-const float KP_HEADING = 2000.0f;
-const float KI_HEADING = 0.0f;
-const float KD_HEADING = 0.0f;
+// Control gains for heading control
+const float KP_HEADING = 0.5f;
+const float KI_HEADING = 0.01f;
+const float KD_HEADING = 0.1f;
 
 // State
 unsigned long lastTime = 0;
@@ -126,6 +126,7 @@ void setup()
 
     Serial.println("=== Ready! ===");
     Serial.println("Commands: v<speed>, h<heading>, l<rpm>, r<rpm>, p<angle_deg>, q<angle_deg>, al<angle>, ar<angle>, stop, reset, magcal, pivotzero, pivotreset, status");
+    Serial.println("Note: 'v' command maintains current heading using IMU");
 }
 
 // Normalize angle to [-180, 180]
@@ -138,119 +139,224 @@ float normalizeAngle(float angle)
     return angle;
 }
 
+// Process a serial command string
+void processCommand(String input)
+{
+    input.trim();
+
+    switch (input.charAt(0))
+    {
+    case 'h':
+    {
+        targetHeading = input.substring(1).toFloat();
+        headingErrorIntegral = 0.0f;
+        Serial.print("Target heading: ");
+        Serial.println(targetHeading);
+        break;
+    }
+    case 'v':
+    {
+        desiredSpeed = input.substring(1).toFloat();
+        Serial.print("Speed: ");
+        Serial.println(desiredSpeed);
+
+        // Set target heading to current heading for straight line movement
+        if (imuAvailable) {
+            targetHeading = imu.getYaw();
+            headingErrorIntegral = 0.0f; // Reset integral when starting new movement
+            Serial.print("Target heading set to current: ");
+            Serial.println(targetHeading);
+        }
+
+        // Don't set wheel speeds here - let the heading control in loop() handle it
+        break;
+    }
+    case 'a':
+    {
+        char side = input.charAt(1);
+        String angleStr = input.substring(2);
+        float angle = angleStr.toFloat();
+
+        if (side == 'l')
+        {
+            Serial.print("Setting left pivot angle: ");
+            Serial.println(angle);
+            robot.setSteeringAngles(angle * PI / 180.0f, robot.getRightAngle());
+        }
+        else if (side == 'r')
+        {
+            Serial.print("Setting right pivot angle: ");
+            Serial.println(angle);
+            robot.setSteeringAngles(robot.getLeftAngle(), angle * PI / 180.0f);
+        }
+        else
+        {
+            angle = input.substring(1).toFloat();
+            Serial.println("Setting pivot angle: " + String(angle));
+            robot.setSteeringAngles(angle * PI / 180.0f, angle * PI / 180.0f);
+        }
+        break;
+    }
+    case 's':
+    {
+        char side = input.charAt(1);
+        float speed = input.substring(2).toFloat();
+        if (side == 'l')
+        {
+            Serial.print("Setting left motor speed: ");
+            Serial.println(speed);
+            robot.setWheelSpeeds(speed, robot.getRightRPM());
+        }
+        else if (side == 'r')
+        {
+            Serial.print("Setting right motor speed: ");
+            Serial.println(speed);
+            robot.setWheelSpeeds(robot.getLeftRPM(), speed);
+        }
+        break;
+    }
+    default:
+    {
+        if (input == "stop")
+        {
+            desiredSpeed = 0.0f;
+            targetHeading = 0.0f; // Reset target heading when stopping
+            headingErrorIntegral = 0.0f;
+            robot.stop();
+        }
+        else if (input == "reset")
+        {
+            imu.calibrateOrientation();
+            imu.resetBiasEstimation();
+            robot.stop();
+            targetHeading = 0.0f;
+            desiredSpeed = 0.0f;
+            headingErrorIntegral = 0.0f;
+            lastLeftCounts = *leftMotor.getCounts();
+            lastRightCounts = *rightMotor.getCounts();
+            Serial.println("Reset complete");
+        }
+        else if (input == "magcal")
+        {
+            // Stop motors during calibration
+            robot.emergencyStop();
+            imu.calibrateMagnetometer(15); // 15 seconds to rotate robot
+            imu.calibrateOrientation();
+            Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
+        }
+        else if (input == "pivotzero")
+        {
+            robot.calibratePivotZero();
+        }
+        else if (input == "pivotreset")
+        {
+            robot.resetPivotAngles();
+        }
+        break;
+    }
+    }
+}
+
+// Simulate sending a serial command to the robot
+void sendSerialCommand(String command)
+{
+    Serial.print("Simulating command: ");
+    Serial.println(command);
+    processCommand(command);
+}
+
+
+
+
+void wallFollow()
+{
+    static unsigned long lastWallFollowTime = 0;
+    unsigned long currentTime = millis();
+    
+    // Only update wall following at 10Hz (every 100ms) to prevent oscillation
+    if (currentTime - lastWallFollowTime < 100) {
+        return;
+    }
+    lastWallFollowTime = currentTime;
+
+    float setpoint = 10.0f;
+    float sensorReading = tofSensors.getFilteredDistance(1);
+    
+    // Check if sensor reading is valid (not 0 or invalid)
+    if (sensorReading <= 0 || sensorReading > 2000) {
+        Serial.println("Wall follow: Invalid sensor reading");
+        return; // Skip if sensor reading is invalid
+    }
+    
+    float error = sensorReading - setpoint; // left sensor
+
+    // Simple P controller
+    float Kp = 10.0f; // Reduced gain for stability
+    float correction = Kp * -error;
+
+    // Constrain to reasonable steering angles
+    correction = constrain(correction, -45.0f, 45.0f);
+
+    // Debug output
+    Serial.print("Wall follow - Sensor: ");
+    Serial.print(sensorReading, 1);
+    Serial.print("mm, Error: ");
+    Serial.print(error, 1);
+    Serial.print(", Correction: ");
+    Serial.print(correction, 1);
+    Serial.println("°");
+
+    // Set steering angles directly instead of using serial command
+    robot.setSteeringAngles(correction * PI / 180.0f, correction * PI / 180.0f);
+}
+
+void corridorFollow()
+{
+    float error = tofSensors.getFilteredDistance(0) - tofSensors.getFilteredDistance(1); // left and right error
+}
+
 void loop()
 {
     unsigned long currentTime = millis();
+    // wallFollow();
 
     if (imuAvailable && currentTime - lastTime > 10)
     {
         imu.update();
+        
+        // Heading control - adjust wheel speeds to maintain target heading
+        if (targetHeading != 0.0f || desiredSpeed != 0.0f) {
+            float currentHeading = imu.getYaw();
+            float headingError = normalizeAngle(targetHeading - currentHeading);
+            
+            // PID control for heading
+            headingErrorIntegral += headingError * 0.01f; // dt = 10ms
+            headingErrorIntegral = constrain(headingErrorIntegral, -50.0f, 50.0f); // Anti-windup
+            
+            float headingDerivative = (headingError - lastHeadingError) / 0.01f;
+            lastHeadingError = headingError;
+            
+            float headingCorrection = KP_HEADING * headingError + 
+                                    KI_HEADING * headingErrorIntegral + 
+                                    KD_HEADING * headingDerivative;
+            
+            // Apply heading correction to wheel speeds
+            float leftSpeed = desiredSpeed - headingCorrection;
+            float rightSpeed = desiredSpeed + headingCorrection;
+            
+            // Constrain speeds to reasonable limits
+            leftSpeed = constrain(leftSpeed, -50.0f, 50.0f);
+            rightSpeed = constrain(rightSpeed, -50.0f, 50.0f);
+            
+            robot.setWheelSpeeds(leftSpeed, rightSpeed);
+        }
     }
 
     // Serial commands
     if (Serial.available() > 0)
     {
         String input = Serial.readStringUntil('\n');
-        input.trim();
-
-        switch (input.charAt(0))
-        {
-        case 'h':
-        {
-            targetHeading = input.substring(1).toFloat();
-            headingErrorIntegral = 0.0f;
-            Serial.print("Target heading: ");
-            Serial.println(targetHeading);
-            break;
-        }
-        case 'v':
-        {
-            desiredSpeed = input.substring(1).toFloat();
-            Serial.print("Speed: ");
-            Serial.println(desiredSpeed);
-
-            robot.setWheelSpeeds(desiredSpeed, desiredSpeed);
-            break;
-        }
-        case 'a':
-        {
-            char side = input.charAt(1);
-            String angleStr = input.substring(2);
-            float angle = angleStr.toFloat();
-            
-            if (side == 'l')
-            {
-                Serial.print("Setting left pivot angle: ");
-                Serial.println(angle);
-                robot.setSteeringAngles(angle * PI / 180.0f, robot.getRightAngle());
-            }
-            else if (side == 'r')
-            {
-                Serial.print("Setting right pivot angle: ");
-                Serial.println(angle);
-                robot.setSteeringAngles(robot.getLeftAngle(), angle * PI / 180.0f);
-            } else {
-                angle = input.substring(1).toFloat();
-                Serial.println("Setting pivot angle: " + String(angle));
-                robot.setSteeringAngles(angle * PI / 180.0f, angle * PI / 180.0f);
-            }
-            break;
-        }
-        case 's':
-        {
-            char side = input.charAt(1);
-            float speed = input.substring(2).toFloat();
-            if (side == 'l')
-            {
-                Serial.print("Setting left motor speed: ");
-                Serial.println(speed);
-                robot.setWheelSpeeds(speed, robot.getRightRPM());
-            }
-            else if (side == 'r')
-            {
-                Serial.print("Setting right motor speed: ");
-                Serial.println(speed);
-                robot.setWheelSpeeds(robot.getLeftRPM(), speed);
-            }
-            break;
-        }
-        default:
-        {
-            if (input == "stop")
-            {
-                desiredSpeed = 0.0f;
-                robot.stop();
-            }
-            else if (input == "reset")
-            {
-                imu.calibrateOrientation();
-                imu.resetBiasEstimation();
-                robot.stop();
-                targetHeading = 0.0f;
-                headingErrorIntegral = 0.0f;
-                lastLeftCounts = *leftMotor.getCounts();
-                lastRightCounts = *rightMotor.getCounts();
-                Serial.println("Reset complete");
-            }
-            else if (input == "magcal")
-            {
-                // Stop motors during calibration
-                robot.emergencyStop();
-                imu.calibrateMagnetometer(15); // 15 seconds to rotate robot
-                imu.calibrateOrientation();
-                Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
-            }
-            else if (input == "pivotzero")
-            {
-                robot.calibratePivotZero();
-            }
-            else if (input == "pivotreset")
-            {
-                robot.resetPivotAngles();
-            }
-            break;
-        }
-        }
+        processCommand(input);
     }
 
     // Debug output at 10Hz (only if not in quiet mode)
@@ -258,26 +364,19 @@ void loop()
     if (!quietMode && Serial && currentTime - lastPrint > 1000)
     {
         lastPrint = currentTime;
-        // Serial.print("Target: ");
-        // Serial.print(targetHeading, 1);
-        // Serial.print("° | IMU: ");
-        // Serial.print(imu.getYaw(), 1);
-        // Serial.print("° | Err: ");
-        // Serial.print(lastHeadingError, 1);
-        // Serial.print("° | Pos: (");
-        // Serial.print(odometry.getX(), 3);
-        // Serial.print(", ");
-        // Serial.print(odometry.getY(), 3);
-        // Serial.print(") | Mag: (");
-        // Serial.print(imu.getMx(), 1);
-        // Serial.print(", ");
-        // Serial.print(imu.getMy(), 1);
-        // Serial.print(", ");
-        // Serial.print(imu.getMz(), 1);
-        // Serial.println(")");
+        if (imuAvailable)
+        {
+            Serial.print("IMU Yaw:\t");
+            Serial.print(imu.getYaw(), 2);
+            Serial.print(" | Target:\t");
+            Serial.print(targetHeading, 2);
+            Serial.print(" | Speed:\t");
+            Serial.print(desiredSpeed, 1);
+            Serial.println();
+        }
 
         // Robot controller status
-        robot.printStatus();
+        // robot.printStatus();
 
         // Serial.print("leftPivot Counts:\t");
         // Serial.print(*leftPivot.getCounts());
@@ -295,6 +394,9 @@ void loop()
         // Serial.print(*leftPivot.getSpeed());
         // Serial.print(" | rightPivot Speed:\t");
         // Serial.print(*rightPivot.getSpeed());
+
+        // Serial.print("TOF0 Distance: " + String(tofSensors.getFilteredDistance(0)) + " mm\t");
+        // Serial.print(" | TOF1 Distance: " + String(tofSensors.getFilteredDistance(1)) + " mm");
         Serial.println();
         // Update last time for next iteration
     }

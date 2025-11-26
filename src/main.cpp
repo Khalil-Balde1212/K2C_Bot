@@ -98,6 +98,10 @@ void setup() {
             delay(10);
         }
         imu.calibrateOrientation();
+
+        // Enable continuous bias estimation for drift reduction
+        imu.enableBiasEstimation(true);
+
         imuAvailable = true;
         Serial.println("IMU calibrated!");
     }
@@ -175,10 +179,9 @@ float normalizeAngle(float angle) {
 void loop() {
     unsigned long currentTime = millis();
 
-    // // Update IMU at 20Hz (only if available)
-    // if (imuAvailable && currentTime - lastTime > 50) {
-    //     imu.update();
-    // }
+    if (imuAvailable && currentTime - lastTime > 10) {
+        imu.update();
+    }
 
     // // Control loop at 100Hz
     // if (currentTime - lastProcessTime > 10) {
@@ -305,6 +308,7 @@ void loop() {
             } else if (input == "reset") {
                 odometry.reset();
                 imu.calibrateOrientation();
+                imu.resetBiasEstimation();
                 targetHeading = 0.0f;
                 headingErrorIntegral = 0.0f;
                 lastLeftCounts = *leftMotor.getCounts();
@@ -326,23 +330,23 @@ void loop() {
     static unsigned long lastPrint = 0;
     if (!quietMode && Serial && currentTime - lastPrint > 100) {
         lastPrint = currentTime;
-        // Serial.print("Target: ");
-        // Serial.print(targetHeading, 1);
-        // Serial.print("° | IMU: ");
-        // Serial.print(imu.getYaw(), 1);
-        // Serial.print("° | Err: ");
-        // Serial.print(lastHeadingError, 1);
-        // Serial.print("° | Pos: (");
-        // Serial.print(odometry.getX(), 3);
-        // Serial.print(", ");
-        // Serial.print(odometry.getY(), 3);
-        // Serial.print(") | Mag: (");
-        // Serial.print(imu.getMx(), 1);
-        // Serial.print(", ");
-        // Serial.print(imu.getMy(), 1);
-        // Serial.print(", ");
-        // Serial.print(imu.getMz(), 1);
-        // Serial.println(")");
+        Serial.print("Target: ");
+        Serial.print(targetHeading, 1);
+        Serial.print("° | IMU: ");
+        Serial.print(imu.getYaw(), 1);
+        Serial.print("° | Err: ");
+        Serial.print(lastHeadingError, 1);
+        Serial.print("° | Pos: (");
+        Serial.print(odometry.getX(), 3);
+        Serial.print(", ");
+        Serial.print(odometry.getY(), 3);
+        Serial.print(") | Mag: (");
+        Serial.print(imu.getMx(), 1);
+        Serial.print(", ");
+        Serial.print(imu.getMy(), 1);
+        Serial.print(", ");
+        Serial.print(imu.getMz(), 1);
+        Serial.println(")");
     
         // Serial.print("Left Counts:\t");
         // Serial.print(*leftMotor.getCounts());
@@ -354,15 +358,15 @@ void loop() {
         // Serial.println(*rightPivot.getCounts());
 
 
-        Serial.print("leftTOF:\t");
-        Serial.print(tofSensors.getFilteredDistance(0));
-        Serial.print(" (raw:");
-        Serial.print(tofSensors.readSensor(0));
-        Serial.print(") | rightTOF:\t");
-        Serial.print(tofSensors.getFilteredDistance(1));
-        Serial.print(" (raw:");
-        Serial.print(tofSensors.readSensor(1));
-        Serial.println(")");
+        // Serial.print("leftTOF:\t");
+        // Serial.print(tofSensors.getFilteredDistance(0));
+        // Serial.print(" (raw:");
+        // Serial.print(tofSensors.readSensor(0));
+        // Serial.print(") | rightTOF:\t");
+        // Serial.print(tofSensors.getFilteredDistance(1));
+        // Serial.print(" (raw:");
+        // Serial.print(tofSensors.readSensor(1));
+        // Serial.println(")");
 
     }
 

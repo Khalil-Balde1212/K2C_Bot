@@ -4,7 +4,6 @@
 //Libraries
 #include <Arduino.h>
 #include <Arduino_BMI270_BMM150.h>
-#include <MadgwickAHRS.h>
 #include <VL53L0X.h>
 #include <Wire.h>
 #include <algorithm>
@@ -12,38 +11,50 @@
 
 class IMUInterface {
 private:
+    // IMU state
+    bool initialized = false;
+    unsigned long lastUpdateTime = 0;
+    float dt = 0.0f;
 
-    float sensorRate; 
-    Madgwick filter;
-    
-    // IMU variables
+    // Sensor readings
     float ax = 0.0f, ay = 0.0f, az = 0.0f;
     float gx = 0.0f, gy = 0.0f, gz = 0.0f;
     float mx = 0.0f, my = 0.0f, mz = 0.0f;
-    
-    // Orientation values
-    float roll = 0.0f, pitch = 0.0f, heading = 0.0f;
 
+    // Quaternion orientation
+    float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;
+
+    // Calibration offsets
+    float gyro_offset_x = 0.0f, gyro_offset_y = 0.0f, gyro_offset_z = 0.0f;
+    float accel_offset_x = 0.0f, accel_offset_y = 0.0f, accel_offset_z = 0.0f;
+    float mag_offset_x = 0.0f, mag_offset_y = 0.0f, mag_offset_z = 0.0f;
+
+    // Calibration scales
+    float accel_scale_x = 1.0f, accel_scale_y = 1.0f, accel_scale_z = 1.0f;
+    float mag_scale_x = 1.0f, mag_scale_y = 1.0f, mag_scale_z = 1.0f;
+
+    // Orientation offsets (for zeroing)
     float rollOffset = 0.0f;
     float pitchOffset = 0.0f;
     float headingOffset = 0.0f;
-    
-    float gx_bias = 0.0f;  // Gyro bias
-    float gy_bias = 0.0f;
-    float gz_bias = 0.0f;
 
-    // Magnetometer hard iron offsets
-    float mx_offset = 0.0f;
-    float my_offset = 0.0f;
-    float mz_offset = 0.0f;
+    // Madgwick filter parameters
+    float beta = 0.1f; // Filter gain
 
-    // Magnetometer soft iron scale factors
-    float mx_scale = 1.0f;
-    float my_scale = 1.0f;
-    float mz_scale = 1.0f;
+    // Bias estimation for drift correction
+    bool biasEstimationEnabled = false;
+    float gyro_bias_x = 0.0f, gyro_bias_y = 0.0f, gyro_bias_z = 0.0f;
+    float bias_alpha = 0.001f; // Bias learning rate (very slow)
+    unsigned long bias_samples = 0;
+
+    // Madgwick filter methods
+    float invSqrt(float x);
+    void madgwickUpdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz);
+    void madgwickUpdateIMU(float gx, float gy, float gz, float ax, float ay, float az);
+    void quaternionToEuler(float& roll, float& pitch, float& yaw) const;
 
 public:
-    IMUInterface(float sampleRate = 104.00);
+    IMUInterface(float sampleRate = 104.0f);
     bool begin();
     void update();
     float getRoll() const;
@@ -59,10 +70,23 @@ public:
     void setMagCalibration(float mx_off, float my_off, float mz_off,
                            float mx_sc, float my_sc, float mz_sc);
 
+    // Dynamic filter tuning
+    void setMadgwickBeta(float b) { beta = b; }
+    float getMadgwickBeta() const { return beta; }
+
+    // Continuous bias estimation and correction
+    void enableBiasEstimation(bool enable = true) { biasEstimationEnabled = enable; }
+    void updateBiasEstimation();
+    void resetBiasEstimation();
+
     // Debug: get raw magnetometer values
     float getMx() const { return mx; }
     float getMy() const { return my; }
     float getMz() const { return mz; }
+
+    // Additional methods for compatibility
+    float getHeading() const { return getYaw(); }
+    void reset();
 };
 
 namespace TOF{

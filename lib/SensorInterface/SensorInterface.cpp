@@ -1,19 +1,37 @@
 #include <SensorInterface.h>
 
 IMUInterface::IMUInterface(float sampleRate)
-    : sensorRate(sampleRate),
-      filter(),
+    : initialized(false), lastUpdateTime(0), dt(0.0f),
       ax(0.0f), ay(0.0f), az(0.0f),
       gx(0.0f), gy(0.0f), gz(0.0f),
       mx(0.0f), my(0.0f), mz(0.0f),
-      roll(0.0f), pitch(0.0f), heading(0.0f) {
-    filter.begin(sensorRate);
+      q0(1.0f), q1(0.0f), q2(0.0f), q3(0.0f),
+      gyro_offset_x(0.0f), gyro_offset_y(0.0f), gyro_offset_z(0.0f),
+      accel_offset_x(0.0f), accel_offset_y(0.0f), accel_offset_z(0.0f),
+      mag_offset_x(0.0f), mag_offset_y(0.0f), mag_offset_z(0.0f),
+      accel_scale_x(1.0f), accel_scale_y(1.0f), accel_scale_z(1.0f),
+      mag_scale_x(1.0f), mag_scale_y(1.0f), mag_scale_z(1.0f),
+      rollOffset(0.0f), pitchOffset(0.0f), headingOffset(0.0f),
+      beta(0.04f), biasEstimationEnabled(false),
+      gyro_bias_x(0.0f), gyro_bias_y(0.0f), gyro_bias_z(0.0f),
+      bias_alpha(0.001f), bias_samples(0) {
 }
 
 bool IMUInterface::begin() {
     if (!IMU.begin()) {
+        initialized = false;
         return false;
     }
+
+    initialized = true;
+    lastUpdateTime = millis();
+
+    // Initialize quaternion (no rotation)
+    q0 = 1.0f;
+    q1 = 0.0f;
+    q2 = 0.0f;
+    q3 = 0.0f;
+
     return true;
 }
 bool IMUInterface::calibrateGyro(int samples) {
@@ -40,17 +58,17 @@ bool IMUInterface::calibrateGyro(int samples) {
         }
     }
     
-    gx_bias = sum_gx / samples;
-    gy_bias = sum_gy / samples;
-    gz_bias = sum_gz / samples;
+    gyro_offset_x = sum_gx / samples;
+    gyro_offset_y = sum_gy / samples;
+    gyro_offset_z = sum_gz / samples;
     
     Serial.println();
     Serial.print("Gyro bias: gx=");
-    Serial.print(gx_bias);
+    Serial.print(gyro_offset_x);
     Serial.print(" gy=");
-    Serial.print(gy_bias);
+    Serial.print(gyro_offset_y);
     Serial.print(" gz=");
-    Serial.println(gz_bias);
+    Serial.println(gyro_offset_z);
     Serial.println("Calibration complete!");
     
     return true;
@@ -116,9 +134,9 @@ bool IMUInterface::calibrateMagnetometer(int durationSeconds) {
     }
 
     // Compute hard iron offsets (center of the ellipsoid)
-    mx_offset = (mx_max + mx_min) / 2.0f;
-    my_offset = (my_max + my_min) / 2.0f;
-    mz_offset = (mz_max + mz_min) / 2.0f;
+    mag_offset_x = (mx_max + mx_min) / 2.0f;
+    mag_offset_y = (my_max + my_min) / 2.0f;
+    mag_offset_z = (mz_max + mz_min) / 2.0f;
 
     // Compute soft iron scale factors (normalize to sphere)
     float mx_range = (mx_max - mx_min) / 2.0f;
@@ -126,23 +144,23 @@ bool IMUInterface::calibrateMagnetometer(int durationSeconds) {
     float mz_range = (mz_max - mz_min) / 2.0f;
     float avg_range = (mx_range + my_range + mz_range) / 3.0f;
 
-    if (mx_range > 0) mx_scale = avg_range / mx_range;
-    if (my_range > 0) my_scale = avg_range / my_range;
-    if (mz_range > 0) mz_scale = avg_range / mz_range;
+    if (mx_range > 0) mag_scale_x = avg_range / mx_range;
+    if (my_range > 0) mag_scale_y = avg_range / my_range;
+    if (mz_range > 0) mag_scale_z = avg_range / mz_range;
 
     Serial.println("\n=== Magnetometer Calibration Complete ===");
     Serial.print("Hard iron offsets: X=");
-    Serial.print(mx_offset, 2);
+    Serial.print(mag_offset_x, 2);
     Serial.print(" Y=");
-    Serial.print(my_offset, 2);
+    Serial.print(mag_offset_y, 2);
     Serial.print(" Z=");
-    Serial.println(mz_offset, 2);
+    Serial.println(mag_offset_z, 2);
     Serial.print("Soft iron scales:  X=");
-    Serial.print(mx_scale, 3);
+    Serial.print(mag_scale_x, 3);
     Serial.print(" Y=");
-    Serial.print(my_scale, 3);
+    Serial.print(mag_scale_y, 3);
     Serial.print(" Z=");
-    Serial.println(mz_scale, 3);
+    Serial.println(mag_scale_z, 3);
     Serial.print("Total samples: ");
     Serial.println(samples);
 
@@ -150,161 +168,361 @@ bool IMUInterface::calibrateMagnetometer(int durationSeconds) {
 }
 
 void IMUInterface::calibrateOrientation() {
-    rollOffset = roll;
-    pitchOffset = pitch;
-    headingOffset = heading;
+    float roll, pitch, yaw;
+    quaternionToEuler(roll, pitch, yaw);
+    rollOffset = roll * RAD_TO_DEG;
+    pitchOffset = pitch * RAD_TO_DEG;
+    headingOffset = yaw * RAD_TO_DEG;
     Serial.println("Orientation zeroed at current position.");
 }
 
 void IMUInterface::resetCalibration() {
-    gx_bias = 0.0f;
-    gy_bias = 0.0f;
-    gz_bias = 0.0f;
+    gyro_offset_x = 0.0f;
+    gyro_offset_y = 0.0f;
+    gyro_offset_z = 0.0f;
     rollOffset = 0.0f;
     pitchOffset = 0.0f;
     headingOffset = 0.0f;
-    mx_offset = 0.0f;
-    my_offset = 0.0f;
-    mz_offset = 0.0f;
-    mx_scale = 1.0f;
-    my_scale = 1.0f;
-    mz_scale = 1.0f;
+    mag_offset_x = 0.0f;
+    mag_offset_y = 0.0f;
+    mag_offset_z = 0.0f;
+    mag_scale_x = 1.0f;
+    mag_scale_y = 1.0f;
+    mag_scale_z = 1.0f;
     Serial.println("All calibration cleared.");
 }
 
 void IMUInterface::setMagCalibration(float mx_off, float my_off, float mz_off,
                                       float mx_sc, float my_sc, float mz_sc) {
-    mx_offset = mx_off;
-    my_offset = my_off;
-    mz_offset = mz_off;
-    mx_scale = mx_sc;
-    my_scale = my_sc;
-    mz_scale = mz_sc;
+    mag_offset_x = mx_off;
+    mag_offset_y = my_off;
+    mag_offset_z = mz_off;
+    mag_scale_x = mx_sc;
+    mag_scale_y = my_sc;
+    mag_scale_z = mz_sc;
 
     Serial.println("Magnetometer calibration set:");
     Serial.print("  Hard iron: X=");
-    Serial.print(mx_offset, 2);
+    Serial.print(mag_offset_x, 2);
     Serial.print(" Y=");
-    Serial.print(my_offset, 2);
+    Serial.print(mag_offset_y, 2);
     Serial.print(" Z=");
-    Serial.println(mz_offset, 2);
+    Serial.println(mag_offset_z, 2);
     Serial.print("  Soft iron: X=");
-    Serial.print(mx_scale, 3);
+    Serial.print(mag_scale_x, 3);
     Serial.print(" Y=");
-    Serial.print(my_scale, 3);
+    Serial.print(mag_scale_y, 3);
     Serial.print(" Z=");
-    Serial.println(mz_scale, 3);
+    Serial.println(mag_scale_z, 3);
 }
 
-// Update the update() function to use bias correction:
+void IMUInterface::updateBiasEstimation() {
+    if (!biasEstimationEnabled) return;
+
+    // Only update bias when the robot is relatively still (low angular velocity)
+    float gyro_magnitude = sqrt(gx * gx + gy * gy + gz * gz);
+    if (gyro_magnitude < 0.1f) { // Less than ~6 deg/s
+        // Update bias estimates using exponential moving average
+        gyro_bias_x = (1.0f - bias_alpha) * gyro_bias_x + bias_alpha * gx;
+        gyro_bias_y = (1.0f - bias_alpha) * gyro_bias_y + bias_alpha * gy;
+        gyro_bias_z = (1.0f - bias_alpha) * gyro_bias_z + bias_alpha * gz;
+        bias_samples++;
+    }
+}
+
+void IMUInterface::resetBiasEstimation() {
+    gyro_bias_x = 0.0f;
+    gyro_bias_y = 0.0f;
+    gyro_bias_z = 0.0f;
+    bias_samples = 0;
+}
+
 void IMUInterface::update() {
-    if (IMU.accelerationAvailable()) {
+    if (!initialized) return;
+
+    unsigned long currentTime = millis();
+    dt = (currentTime - lastUpdateTime) / 1000.0f;
+    lastUpdateTime = currentTime;
+
+    if (dt <= 0.0f || dt > 0.5f) {
+        dt = 0.01f; // Default to 10ms if timing is off
+    }
+
+    // Read sensor data
+    bool accelAvailable = IMU.accelerationAvailable();
+    bool gyroAvailable = IMU.gyroscopeAvailable();
+    bool magAvailable = IMU.magneticFieldAvailable();
+
+    if (accelAvailable) {
         IMU.readAcceleration(ax, ay, az);
+        // Apply calibration
+        ax = (ax - accel_offset_x) * accel_scale_x;
+        ay = (ay - accel_offset_y) * accel_scale_y;
+        az = (az - accel_offset_z) * accel_scale_z;
     }
-    if (IMU.magneticFieldAvailable()) {
-        IMU.readMagneticField(mx, my, mz);
-    }
-    if (IMU.gyroscopeAvailable()) {
+
+    if (gyroAvailable) {
         IMU.readGyroscope(gx, gy, gz);
+        // Convert to radians/second and apply calibration
+        gx = (gx - gyro_offset_x) * DEG_TO_RAD;
+        gy = (gy - gyro_offset_y) * DEG_TO_RAD;
+        gz = (gz - gyro_offset_z) * DEG_TO_RAD;
 
-        gx -= gx_bias;
-        gy -= gy_bias;
-        gz -= gz_bias;
-
-        // Use Madgwick for roll/pitch (6-DOF is fine for these)
-        filter.updateIMU(gx, gy, gz, ax, ay, az);
-        roll = filter.getRoll();
-        pitch = filter.getPitch();
-
-        // Apply magnetometer calibration (hard iron + soft iron)
-        float mx_cal = (mx - mx_offset) * mx_scale;
-        float my_cal = (my - my_offset) * my_scale;
-        float mz_cal = (mz - mz_offset) * mz_scale;
-
-        // Remap axes for robot frame (Y+ toward USB, USB at back)
-        // Robot forward = -Y_board, Robot right = -X_board
-        float mx_robot = -my_cal;  // Robot forward component
-        float my_robot = -mx_cal;  // Robot right component
-        float mz_robot = mz_cal;   // Robot up component
-
-        // Compute tilt-compensated heading from magnetometer
-        // Roll/pitch from Madgwick also need remapping
-        float rollRad = -pitch * DEG_TO_RAD;   // Robot roll = -board pitch
-        float pitchRad = -roll * DEG_TO_RAD;   // Robot pitch = -board roll
-
-        // Tilt compensation
-        float cosRoll = cos(rollRad);
-        float sinRoll = sin(rollRad);
-        float cosPitch = cos(pitchRad);
-        float sinPitch = sin(pitchRad);
-
-        // Compensate magnetometer readings for tilt
-        float mx_comp = mx_robot * cosPitch + mz_robot * sinPitch;
-        float my_comp = mx_robot * sinRoll * sinPitch + my_robot * cosRoll - mz_robot * sinRoll * cosPitch;
-
-        // Compute magnetic heading (with -10° correction for axis alignment)
-        float magHeading = atan2(-my_comp, mx_comp) * RAD_TO_DEG - 10.0f;
-
-        // Complementary filter: fuse gyro-integrated heading with magnetometer
-        // Only trust magnetometer when robot is stationary (motors corrupt it heavily)
-        static float fusedHeading = 0.0f;
-        static bool initialized = false;
-        static float lastMagHeading = 0.0f;
-
-        if (!initialized) {
-            fusedHeading = magHeading;
-            lastMagHeading = magHeading;
-            initialized = true;
-        } else {
-            // Gyro integration
-            float dt = 1.0f / sensorRate;
-            float gyroHeadingDelta = gz * dt;
-
-            // Handle angle wrapping for fusion
-            float diff = magHeading - fusedHeading;
-            while (diff > 180.0f) diff -= 360.0f;
-            while (diff < -180.0f) diff += 360.0f;
-
-            // Detect motor activity by checking if gyro is showing significant rotation
-            // or if magnetometer is jumping around (interference indicator)
-            float magJump = fabs(magHeading - lastMagHeading);
-            if (magJump > 180.0f) magJump = 360.0f - magJump;  // Handle wrap
-            lastMagHeading = magHeading;
-
-            // Detect activity: gyro rotating OR magnetometer jumping suspiciously
-            bool motorsActive = (fabs(gz) > 5.0f) || (magJump > 10.0f);
-
-            // Only apply magnetometer correction when stationary
-            // When motors active: pure gyro integration (no mag correction)
-            // When stationary: slow mag correction (0.5% per update)
-            float magWeight = motorsActive ? 0.0f : 0.005f;
-
-            fusedHeading = fusedHeading + gyroHeadingDelta + magWeight * diff;
-
-            // Normalize
-            while (fusedHeading > 180.0f) fusedHeading -= 360.0f;
-            while (fusedHeading < -180.0f) fusedHeading += 360.0f;
+        // Apply continuous bias correction if enabled
+        if (biasEstimationEnabled && bias_samples > 100) {
+            gx -= gyro_bias_x;
+            gy -= gyro_bias_y;
+            gz -= gyro_bias_z;
         }
-
-        heading = fusedHeading;
     }
+
+    if (magAvailable) {
+        IMU.readMagneticField(mx, my, mz);
+        // Apply calibration
+        mx = (mx - mag_offset_x) * mag_scale_x;
+        my = (my - mag_offset_y) * mag_scale_y;
+        mz = (mz - mag_offset_z) * mag_scale_z;
+    }
+
+    // Run Madgwick filter
+    if (accelAvailable && gyroAvailable) {
+        if (magAvailable) {
+            // 9DOF Madgwick filter (with magnetometer)
+            madgwickUpdate(gx, gy, gz, ax, ay, az, mx, my, mz);
+        } else {
+            // 6DOF Madgwick filter (IMU only)
+            madgwickUpdateIMU(gx, gy, gz, ax, ay, az);
+        }
+    }
+
+    // Update bias estimation if enabled
+    updateBiasEstimation();
 }
 
 
 float IMUInterface::getRoll() const {
-    return roll - rollOffset;
+    float roll, pitch, yaw;
+    quaternionToEuler(roll, pitch, yaw);
+    return roll * RAD_TO_DEG - rollOffset;
 }
 
 float IMUInterface::getPitch() const {
-    return pitch - pitchOffset;
+    float roll, pitch, yaw;
+    quaternionToEuler(roll, pitch, yaw);
+    return pitch * RAD_TO_DEG - pitchOffset;
 }
 
 float IMUInterface::getYaw() const {
-    float yaw = heading - headingOffset;
+    float roll, pitch, yaw;
+    quaternionToEuler(roll, pitch, yaw);
+    float yaw_deg = yaw * RAD_TO_DEG - headingOffset;
     // Normalize to -180 to 180
-    while (yaw > 180.0f) yaw -= 360.0f;
-    while (yaw < -180.0f) yaw += 360.0f;
-    return yaw;
+    while (yaw_deg > 180.0f) yaw_deg -= 360.0f;
+    while (yaw_deg < -180.0f) yaw_deg += 360.0f;
+    return yaw_deg;
+}
+
+void IMUInterface::reset() {
+    q0 = 1.0f;
+    q1 = 0.0f;
+    q2 = 0.0f;
+    q3 = 0.0f;
+    lastUpdateTime = millis();
+}
+
+// Fast inverse square root approximation
+float IMUInterface::invSqrt(float x) {
+    float halfx = 0.5f * x;
+    float y = x;
+    long i = *(long*)&y;
+    i = 0x5f3759df - (i >> 1);
+    y = *(float*)&i;
+    y = y * (1.5f - (halfx * y * y));
+    return y;
+}
+
+// Madgwick 9DOF filter (with magnetometer)
+void IMUInterface::madgwickUpdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz) {
+    float recipNorm;
+    float s0, s1, s2, s3;
+    float qDot1, qDot2, qDot3, qDot4;
+    float hx, hy;
+    float _2q0mx, _2q0my, _2q0mz, _2q1mx, _2bx, _2bz, _4bx, _4bz, _2q0, _2q1, _2q2, _2q3, _2q0q2, _2q2q3, q0q0, q0q1, q0q2, q0q3, q1q1, q1q2, q1q3, q2q2, q2q3, q3q3;
+
+    // Rate of change of quaternion from gyroscope
+    qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
+    qDot2 = 0.5f * (q0 * gx + q2 * gz - q3 * gy);
+    qDot3 = 0.5f * (q0 * gy - q1 * gz + q3 * gx);
+    qDot4 = 0.5f * (q0 * gz + q1 * gy - q2 * gx);
+
+    // Compute feedback only if accelerometer measurement valid
+    if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
+
+        // Normalise accelerometer measurement
+        recipNorm = invSqrt(ax * ax + ay * ay + az * az);
+        ax *= recipNorm;
+        ay *= recipNorm;
+        az *= recipNorm;
+
+        // Normalise magnetometer measurement
+        recipNorm = invSqrt(mx * mx + my * my + mz * mz);
+        mx *= recipNorm;
+        my *= recipNorm;
+        mz *= recipNorm;
+
+        // Auxiliary variables to avoid repeated arithmetic
+        _2q0mx = 2.0f * q0 * mx;
+        _2q0my = 2.0f * q0 * my;
+        _2q0mz = 2.0f * q0 * mz;
+        _2q1mx = 2.0f * q1 * mx;
+        _2q0 = 2.0f * q0;
+        _2q1 = 2.0f * q1;
+        _2q2 = 2.0f * q2;
+        _2q3 = 2.0f * q3;
+        _2q0q2 = 2.0f * q0 * q2;
+        _2q2q3 = 2.0f * q2 * q3;
+        q0q0 = q0 * q0;
+        q0q1 = q0 * q1;
+        q0q2 = q0 * q2;
+        q0q3 = q0 * q3;
+        q1q1 = q1 * q1;
+        q1q2 = q1 * q2;
+        q1q3 = q1 * q3;
+        q2q2 = q2 * q2;
+        q2q3 = q2 * q3;
+        q3q3 = q3 * q3;
+
+        // Reference direction of Earth's magnetic field
+        hx = mx * q0q0 - _2q0my * q3 + _2q0mz * q2 + mx * q1q1 + _2q1 * my * q2 + _2q1 * mz * q3 - mx * q2q2 - mx * q3q3;
+        hy = _2q0mx * q3 + my * q0q0 - _2q0mz * q1 + _2q1mx * q2 - my * q1q1 + my * q2q2 + _2q2 * mz * q3 - my * q3q3;
+        _2bx = sqrt(hx * hx + hy * hy);
+        _2bz = -_2q0mx * q2 + _2q0my * q1 + mz * q0q0 + _2q1mx * q3 - mz * q1q1 + _2q2 * my * q3 - mz * q2q2 + mz * q3q3;
+        _4bx = 2.0f * _2bx;
+        _4bz = 2.0f * _2bz;
+
+        // Gradient decent algorithm corrective step
+        s0 = -_2q2 * (2.0f * q1q3 - _2q0q2 - ax) + _2q1 * (2.0f * q0q1 + _2q2q3 - ay) - _2bz * q2 * (_2bx * (0.5f - q2q2 - q3q3) + _2bz * (q1q3 - q0q2) - mx) + (-_2bx * q3 + _2bz * q1) * (_2bx * (q1q2 - q0q3) + _2bz * (q0q1 + q2q3) - my) + _2bx * q2 * (_2bx * (q0q2 + q1q3) + _2bz * (0.5f - q1q1 - q2q2) - mz);
+        s1 = _2q3 * (2.0f * q1q3 - _2q0q2 - ax) + _2q0 * (2.0f * q0q1 + _2q2q3 - ay) - 4.0f * q1 * (1 - 2.0f * q1q1 - 2.0f * q2q2 - az) + _2bz * q3 * (_2bx * (0.5f - q2q2 - q3q3) + _2bz * (q1q3 - q0q2) - mx) + (_2bx * q2 + _2bz * q0) * (_2bx * (q1q2 - q0q3) + _2bz * (q0q1 + q2q3) - my) + (_2bx * q3 - _4bz * q1) * (_2bx * (q0q2 + q1q3) + _2bz * (0.5f - q1q1 - q2q2) - mz);
+        s2 = -_2q0 * (2.0f * q1q3 - _2q0q2 - ax) + _2q3 * (2.0f * q0q1 + _2q2q3 - ay) - 4.0f * q2 * (1 - 2.0f * q1q1 - 2.0f * q2q2 - az) + (-_4bx * q2 - _2bz * q0) * (_2bx * (0.5f - q2q2 - q3q3) + _2bz * (q1q3 - q0q2) - mx) + (_2bx * q1 + _2bz * q3) * (_2bx * (q1q2 - q0q3) + _2bz * (q0q1 + q2q3) - my) + (_2bx * q0 - _4bz * q2) * (_2bx * (q0q2 + q1q3) + _2bz * (0.5f - q1q1 - q2q2) - mz);
+        s3 = _2q1 * (2.0f * q1q3 - _2q0q2 - ax) + _2q2 * (2.0f * q0q1 + _2q2q3 - ay) + (-_4bx * q3 + _2bz * q1) * (_2bx * (0.5f - q2q2 - q3q3) + _2bz * (q1q3 - q0q2) - mx) + (-_2bx * q0 + _2bz * q2) * (_2bx * (q1q2 - q0q3) + _2bz * (q0q1 + q2q3) - my) + _2bx * q1 * (_2bx * (q0q2 + q1q3) + _2bz * (0.5f - q1q1 - q2q2) - mz);
+
+        // Normalise step magnitude
+        recipNorm = invSqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
+        s0 *= recipNorm;
+        s1 *= recipNorm;
+        s2 *= recipNorm;
+        s3 *= recipNorm;
+
+        // Apply feedback step
+        qDot1 -= beta * s0;
+        qDot2 -= beta * s1;
+        qDot3 -= beta * s2;
+        qDot4 -= beta * s3;
+    }
+
+    // Integrate rate of change of quaternion to yield quaternion
+    q0 += qDot1 * dt;
+    q1 += qDot2 * dt;
+    q2 += qDot3 * dt;
+    q3 += qDot4 * dt;
+
+    // Normalise quaternion
+    recipNorm = invSqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
+    q0 *= recipNorm;
+    q1 *= recipNorm;
+    q2 *= recipNorm;
+    q3 *= recipNorm;
+}
+
+// Madgwick 6DOF filter (IMU only, no magnetometer)
+void IMUInterface::madgwickUpdateIMU(float gx, float gy, float gz, float ax, float ay, float az) {
+    float recipNorm;
+    float s0, s1, s2, s3;
+    float qDot1, qDot2, qDot3, qDot4;
+    float _2q0, _2q1, _2q2, _2q3, _4q0, _4q1, _4q2 ,_8q1, _8q2, q0q0, q1q1, q2q2, q3q3;
+
+    // Rate of change of quaternion from gyroscope
+    qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
+    qDot2 = 0.5f * (q0 * gx + q2 * gz - q3 * gy);
+    qDot3 = 0.5f * (q0 * gy - q1 * gz + q3 * gx);
+    qDot4 = 0.5f * (q0 * gz + q1 * gy - q2 * gx);
+
+    // Compute feedback only if accelerometer measurement valid
+    if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
+
+        // Normalise accelerometer measurement
+        recipNorm = invSqrt(ax * ax + ay * ay + az * az);
+        ax *= recipNorm;
+        ay *= recipNorm;
+        az *= recipNorm;
+
+        // Auxiliary variables to avoid repeated arithmetic
+        _2q0 = 2.0f * q0;
+        _2q1 = 2.0f * q1;
+        _2q2 = 2.0f * q2;
+        _2q3 = 2.0f * q3;
+        _4q0 = 4.0f * q0;
+        _4q1 = 4.0f * q1;
+        _4q2 = 4.0f * q2;
+        _8q1 = 8.0f * q1;
+        _8q2 = 8.0f * q2;
+        q0q0 = q0 * q0;
+        q1q1 = q1 * q1;
+        q2q2 = q2 * q2;
+        q3q3 = q3 * q3;
+
+        // Gradient decent algorithm corrective step
+        s0 = _4q0 * q2q2 + _2q2 * ax + _4q0 * q1q1 - _2q1 * ay;
+        s1 = _4q1 * q3q3 - _2q3 * ax + 4.0f * q0q0 * q1 - _2q0 * ay - _4q1 + _8q1 * q1q1 + _8q1 * q2q2 + _4q1 * az;
+        s2 = 4.0f * q0q0 * q2 + _2q0 * ax + _4q2 * q3q3 - _2q3 * ay - _4q2 + _8q2 * q1q1 + _8q2 * q2q2 + _4q2 * az;
+        s3 = 4.0f * q1q1 * q3 - _2q1 * ax + 4.0f * q2q2 * q3 - _2q2 * ay;
+
+        // Normalise step magnitude
+        recipNorm = invSqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
+        s0 *= recipNorm;
+        s1 *= recipNorm;
+        s2 *= recipNorm;
+        s3 *= recipNorm;
+
+        // Apply feedback step
+        qDot1 -= beta * s0;
+        qDot2 -= beta * s1;
+        qDot3 -= beta * s2;
+        qDot4 -= beta * s3;
+    }
+
+    // Integrate rate of change of quaternion to yield quaternion
+    q0 += qDot1 * dt;
+    q1 += qDot2 * dt;
+    q2 += qDot3 * dt;
+    q3 += qDot4 * dt;
+
+    // Normalise quaternion
+    recipNorm = invSqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
+    q0 *= recipNorm;
+    q1 *= recipNorm;
+    q2 *= recipNorm;
+    q3 *= recipNorm;
+}
+
+// Convert quaternion to Euler angles
+void IMUInterface::quaternionToEuler(float& roll, float& pitch, float& yaw) const {
+    // Roll (x-axis rotation)
+    float sinr_cosp = 2 * (q0 * q1 + q2 * q3);
+    float cosr_cosp = 1 - 2 * (q1 * q1 + q2 * q2);
+    roll = atan2(sinr_cosp, cosr_cosp);
+
+    // Pitch (y-axis rotation)
+    float sinp = 2 * (q0 * q2 - q3 * q1);
+    if (abs(sinp) >= 1)
+        pitch = copysign(PI / 2, sinp); // Use 90 degrees if out of range
+    else
+        pitch = asin(sinp);
+
+    // Yaw (z-axis rotation)
+    float siny_cosp = 2 * (q0 * q3 + q1 * q2);
+    float cosy_cosp = 1 - 2 * (q2 * q2 + q3 * q3);
+    yaw = atan2(siny_cosp, cosy_cosp);
 }
 
 namespace TOF {

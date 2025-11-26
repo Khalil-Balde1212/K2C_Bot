@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <MotorInterface.h>
 #include <SensorInterface.h>
+#include <RobotController.h>
 #include "inverse_kinematics/inverse_kinematics.h"
 #include "forward_kinematics/fk.h"
 
@@ -9,7 +10,10 @@ Motor leftMotor(12, 13, 2, 7);
 Motor leftPivot(15, 14, 11, 8);
 
 Motor rightMotor(5, 4, 3, 4);
-Motor rightPivot(7, 6, 10, 9); 
+Motor rightPivot(7, 6, 10, 9);
+
+// Robot Controller
+RobotController robot(&leftMotor, &rightMotor, &leftPivot, &rightPivot); 
 
 
 // Sensors
@@ -28,11 +32,9 @@ const float KD_HEADING = 0.0f;
 
 // State
 unsigned long lastTime = 0;
-unsigned long lastProcessTime = 0;
 float targetHeading = 0.0f;
 float desiredSpeed = 0.2f; // m/s (reduced from 5.0 to reasonable speed)
 bool quietMode = false; // Enable debug output by default
-bool directControlMode = false; // Direct motor control for testing
 
 // PID state
 float headingErrorIntegral = 0.0f;
@@ -73,12 +75,14 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(rightPivot.encA),
                     []() { rightPivot.updateCounts(); }, RISING);
 
-    // Stop all
-    leftMotor.setRawSpeed(0);
-    rightMotor.setRawSpeed(0);
-    leftPivot.setRawSpeed(0);
-    rightPivot.setRawSpeed(0);
-    Serial.println("Motors initialized!");
+    // Initialize Robot Controller
+    Serial.println("Initializing robot controller...");
+    if (!robot.begin()) {
+        Serial.println("ERROR: Robot controller initialization failed!");
+        while (1); // Halt if controller fails
+    }
+
+    Serial.println("Motors and controller initialized!");
 
     // Init IMU (FIXED: non-blocking, continues even if IMU fails)
     Serial.println("Initializing IMU...");
@@ -131,42 +135,17 @@ void setup() {
 
     
     Serial.println("=== Ready! ===");
-    Serial.println("Commands: direct, auto, lm/rm/lp/rp <pwm>, stop, quiet, status, v<speed>, h<heading>");
+    Serial.println("Commands: v<speed>, h<heading>, l<rpm>, r<rpm>, p<angle_deg>, q<angle_deg>, stop, reset, magcal, status");
 }
 
-// RPM to PWM
-int rpmToPWM(float rpm) {
-    float maxRPM = 100.0f;
-    int pwm = (int)((rpm / maxRPM) * 4096.0f);
-    return constrain(pwm, -4096, 4096);
-}
-
-// Steering angle to PWM
-int angleToSteeringPWM(float angle_rad) {
-    float angle_deg = angle_rad * 57.2958f;
-    int pwm = (int)(angle_deg * 45.5f);
-    return constrain(pwm, -4096, 4096);
-}
-
-// Execute motion using IK
+// Execute motion using Robot Controller
 void executeMotion(float vx, float vy, float omega) {
-    IK ik(vx, vy, omega);
+    robot.setVelocity(vx, vy, omega);
 
     // Store commanded velocities for FK
     lastCmdVx = vx;
     lastCmdVy = vy;
     lastCmdOmega = omega;
-
-    // Set steering
-    leftPivot.setRawSpeed(angleToSteeringPWM(ik.theta_left));
-    rightPivot.setRawSpeed(angleToSteeringPWM(ik.theta_right));
-
-    // Set drive speeds (right needs extra negation; left matches IK frame)
-    float leftSpeed = (ik.wheel_speeds[0] + ik.wheel_speeds[2]) / 2.0f;
-    float rightSpeed = (ik.wheel_speeds[1] + ik.wheel_speeds[3]) / 2.0f;
-
-    leftMotor.setRawSpeed(rpmToPWM(leftSpeed));
-    rightMotor.setRawSpeed(-rpmToPWM(rightSpeed));
 }
 
 // Normalize angle to [-180, 180]
@@ -182,77 +161,6 @@ void loop() {
     if (imuAvailable && currentTime - lastTime > 10) {
         imu.update();
     }
-
-    // // Control loop at 100Hz
-    // if (currentTime - lastProcessTime > 10) {
-    //     float dt = (currentTime - lastProcessTime) / 1000.0f;
-    //     lastProcessTime = currentTime;
-
-    //     // Skip automatic control if in direct control mode
-    //     if (!directControlMode) {
-    //         // Get current encoder counts
-    //         int leftCounts = *leftMotor.getCounts();
-    //         int rightCounts = *rightMotor.getCounts();
-
-    //         // Compute delta counts since last update
-    //         int deltaLeft = leftCounts - lastLeftCounts;
-    //         int deltaRight = rightCounts - lastRightCounts;
-    //         lastLeftCounts = leftCounts;
-    //         lastRightCounts = rightCounts;
-
-    //         // Convert encoder counts to wheel displacement (meters)
-    //         float distPerCount = (2.0f * PI * WHEEL_RADIUS) / COUNTS_PER_REV;
-    //         float leftDist = deltaLeft * distPerCount;
-    //         float rightDist = deltaRight * distPerCount;
-
-    //         // Get steering angle from pivot encoder (approximate from left pivot)
-    //         // CPR for pivot is 2200, convert counts to radians
-    //         int pivotCounts = *leftPivot.getCounts();
-    //         float theta_s = (pivotCounts / 2200.0f) * 2.0f * PI;
-
-    //         // Build delta_s array [FL, FR, RL, RR] - using same displacement for front/rear
-    //         float delta_s[4] = {leftDist, rightDist, leftDist, rightDist};
-
-    //         // Update odometry from actual encoder measurements
-    //         odometry.updateFromEncoders(delta_s, theta_s, dt);
-
-    //         // Use IMU heading if available, otherwise assume no heading drift (0 degrees)
-    //         float fusedHeading = imuAvailable ? imu.getYaw() : 0.0f;
-
-    //         // Compute heading error
-    //         float headingError = normalizeAngle(targetHeading - fusedHeading);
-
-    //         // PID control for heading
-    //         headingErrorIntegral += headingError * dt;
-    //         headingErrorIntegral = constrain(headingErrorIntegral, -10.0f, 10.0f);
-
-    //         float headingErrorDerivative = (headingError - lastHeadingError) / dt;
-    //         lastHeadingError = headingError;
-
-    //         // Compute angular velocity command
-    //         // Positive error (robot left of target) needs negative omega (turn right/CW)
-    //         // So omega = -K * error gives correct sign
-    //         float omega = -(KP_HEADING * headingError +
-    //                         KI_HEADING * headingErrorIntegral +
-    //                         KD_HEADING * headingErrorDerivative) * (PI / 180.0f);
-
-    //         // Limit omega to stay below PIVOT threshold (0.5 rad/s)
-    //         omega = constrain(omega, -0.4f, 0.4f);
-
-    //         // Move forward at desired speed while correcting heading
-    //         float vx = desiredSpeed;
-    //         float vy = 0.0f;
-
-    //         // Execute motion
-    //         executeMotion(vx, vy, omega);
-    //     }
-
-    //     // Always update motors
-    //     leftMotor.update(lastProcessTime, currentTime);
-    //     rightMotor.update(lastProcessTime, currentTime);
-    //     leftPivot.update(lastProcessTime, currentTime);
-    //     rightPivot.update(lastProcessTime, currentTime);
-    // }
 
     // Serial commands
     if (Serial.available() > 0) {
@@ -275,40 +183,43 @@ void loop() {
             }
             case 'l': {
                 desiredSpeed = input.substring(1).toFloat();
-                leftMotor.setRawSpeed(desiredSpeed*4095);
+                robot.setWheelSpeeds(desiredSpeed, robot.getRightRPM());
                 Serial.print("Left Motor Speed: ");
                 Serial.println(desiredSpeed);
                 break;
             }
             case 'r': {
                 desiredSpeed = input.substring(1).toFloat();
-                rightMotor.setRawSpeed(desiredSpeed*4095);
+                robot.setWheelSpeeds(robot.getLeftRPM(), desiredSpeed);
                 Serial.print("Right Motor Speed: ");
                 Serial.println(desiredSpeed);
                 break;
             }
             case 'p': {
                 desiredSpeed = input.substring(1).toFloat();
-                leftPivot.setRawSpeed(desiredSpeed*4095);
-                Serial.print("Pivot Speed: ");
+                float angle_rad = desiredSpeed * PI / 180.0f;  // Convert degrees to radians
+                robot.setSteeringAngles(angle_rad, robot.getRightAngle());
+                Serial.print("Left Pivot Angle: ");
                 Serial.println(desiredSpeed);
                 break;
             }
             case 'q': {
                 desiredSpeed = input.substring(1).toFloat();
-                rightPivot.setRawSpeed(desiredSpeed*4095);
-                Serial.print("Right Pivot Speed: ");
+                float angle_rad = desiredSpeed * PI / 180.0f;  // Convert degrees to radians
+                robot.setSteeringAngles(robot.getLeftAngle(), angle_rad);
+                Serial.print("Right Pivot Angle: ");
                 Serial.println(desiredSpeed);
                 break;
             }
             default: {
             if (input == "stop") {
                 desiredSpeed = 0.0f;
-                executeMotion(0, 0, 0);
+                robot.stop();
             } else if (input == "reset") {
                 odometry.reset();
                 imu.calibrateOrientation();
                 imu.resetBiasEstimation();
+                robot.stop();
                 targetHeading = 0.0f;
                 headingErrorIntegral = 0.0f;
                 lastLeftCounts = *leftMotor.getCounts();
@@ -316,7 +227,7 @@ void loop() {
                 Serial.println("Reset complete");
             } else if (input == "magcal") {
                 // Stop motors during calibration
-                executeMotion(0, 0, 0);
+                robot.emergencyStop();
                 imu.calibrateMagnetometer(15);  // 15 seconds to rotate robot
                 imu.calibrateOrientation();
                 Serial.println("Copy the calibration values above to setMagCalibration() in setup()");
@@ -347,32 +258,13 @@ void loop() {
         Serial.print(", ");
         Serial.print(imu.getMz(), 1);
         Serial.println(")");
-    
-        // Serial.print("Left Counts:\t");
-        // Serial.print(*leftMotor.getCounts());
-        // Serial.print(" | Right Counts:\t");
-        // Serial.print(*rightMotor.getCounts());
-        // Serial.print(" | LeftP Counts:\t");
-        // Serial.print(*leftPivot.getCounts());
-        // Serial.print(" | RightP Counts:\t");
-        // Serial.println(*rightPivot.getCounts());
 
+        // Robot controller status
+        robot.printStatus();
 
-        // Serial.print("leftTOF:\t");
-        // Serial.print(tofSensors.getFilteredDistance(0));
-        // Serial.print(" (raw:");
-        // Serial.print(tofSensors.readSensor(0));
-        // Serial.print(") | rightTOF:\t");
-        // Serial.print(tofSensors.getFilteredDistance(1));
-        // Serial.print(" (raw:");
-        // Serial.print(tofSensors.readSensor(1));
-        // Serial.println(")");
+    // Update robot controller
+    robot.update(currentTime);
 
-    }
-
-    leftMotor.update(lastTime, currentTime);
-    rightMotor.update(lastTime, currentTime);
-    leftPivot.update(lastTime, currentTime);
-    rightPivot.update(lastTime, currentTime);
+    // Update last time for next iteration
     lastTime = currentTime;
 }

@@ -50,6 +50,8 @@ private:
     int speed;
     unsigned long lastUpdateTime;
 
+    int deadzone = 250;
+
     float WheelDiameter; // inche
 };
 

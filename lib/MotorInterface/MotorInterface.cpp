@@ -34,12 +34,12 @@ void Motor::update(unsigned long currentTime)
     speed = constrain(speed, -4095, 4095);
 
     // Set PWM values based on direction
-    if (speed > 0)
+    if (speed > deadzone)
     {
         pwmDriver.setPWM(motorA, 0, speed);
         pwmDriver.setPWM(motorB, 0, 0);
     }
-    else if (speed < 0)
+    else if (speed < -deadzone)
     {
         pwmDriver.setPWM(motorA, 0, 0);
         pwmDriver.setPWM(motorB, 0, -speed);

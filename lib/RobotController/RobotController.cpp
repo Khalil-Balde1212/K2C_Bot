@@ -62,16 +62,17 @@ RobotController::RobotController(Motor* lm, Motor* rm, Motor* lp, Motor* rp)
     : leftMotor(lm), rightMotor(rm), leftPivot(lp), rightPivot(rp),
       targetLeftRPM(0.0f), targetRightRPM(0.0f),
       targetLeftAngle(0.0f), targetRightAngle(0.0f),
+      leftPivotOffset(0.0f), rightPivotOffset(0.0f),
       initialized(false) {
 
     // Initialize PID controllers with reasonable defaults
     // Drive motors: Speed PID (RPM control)
-    leftDrivePID.setGains(2.0f, 0.1f, 0.05f);
-    rightDrivePID.setGains(2.0f, 0.1f, 0.05f);
+    leftDrivePID.setGains(1.0f, 0.0f, 0.00f);
+    rightDrivePID.setGains(1.0f, 0.0f, 0.00f);
 
-    // Pivot motors: Position PID (angle control)
-    leftPivotPID.setGains(5.0f, 0.0f, 0.1f);
-    rightPivotPID.setGains(5.0f, 0.0f, 0.1f);
+    // Pivot motors: Position PID (angle control) - tuned for position control
+    leftPivotPID.setGains(15000.0f, 10.0f, 50.0f);
+    rightPivotPID.setGains(15000.0f, 10.0f, 50.0f);
 }
 
 bool RobotController::begin() {
@@ -145,12 +146,9 @@ void RobotController::update(unsigned long currentTime) {
     rightMotor->setRawSpeed(rightDrivePWM);
 
     // Update pivot motors (position control)
-    // Convert encoder counts to angles (radians)
-    int leftPivotCounts = *leftPivot->getCounts();
-    int rightPivotCounts = *rightPivot->getCounts();
-
-    float currentLeftAngle = (leftPivotCounts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
-    float currentRightAngle = (rightPivotCounts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
+    // Convert encoder counts to angles (radians) with calibration offset
+    float currentLeftAngle = getLeftAngle();
+    float currentRightAngle = getRightAngle();
 
     int leftPivotPWM = leftPivotPID.compute(targetLeftAngle, currentLeftAngle, currentTime);
     int rightPivotPWM = rightPivotPID.compute(targetRightAngle, currentRightAngle, currentTime);
@@ -202,13 +200,37 @@ float RobotController::getRightRPM() const {
 float RobotController::getLeftAngle() const {
     if (!initialized) return 0.0f;
     int counts = *leftPivot->getCounts();
-    return (counts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
+    float rawAngle = (counts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
+    return rawAngle - leftPivotOffset;
 }
 
 float RobotController::getRightAngle() const {
     if (!initialized) return 0.0f;
     int counts = *rightPivot->getCounts();
-    return (counts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
+    float rawAngle = (counts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
+    return rawAngle - rightPivotOffset;
+}
+
+void RobotController::calibratePivotZero() {
+    if (!initialized) return;
+    
+    int leftCounts = *leftPivot->getCounts();
+    int rightCounts = *rightPivot->getCounts();
+    
+    leftPivotOffset = (leftCounts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
+    rightPivotOffset = (rightCounts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
+    
+    Serial.print("Pivot zero calibrated - Left offset: ");
+    Serial.print(leftPivotOffset * 180.0f / PI, 1);
+    Serial.print("°, Right offset: ");
+    Serial.print(rightPivotOffset * 180.0f / PI, 1);
+    Serial.println("°");
+}
+
+void RobotController::resetPivotAngles() {
+    targetLeftAngle = getLeftAngle();
+    targetRightAngle = getRightAngle();
+    Serial.println("Pivot target angles reset to current position");
 }
 
 void RobotController::printStatus() {
@@ -217,23 +239,23 @@ void RobotController::printStatus() {
         return;
     }
 
-    Serial.print("Drive - Left: ");
+    Serial.print("Drive - Left:\t");
     Serial.print(getLeftRPM(), 1);
-    Serial.print(" RPM (target: ");
+    Serial.print(" RPM (target:\t");
     Serial.print(targetLeftRPM, 1);
-    Serial.print(") | Right: ");
+    Serial.print(") | Right:\t");
     Serial.print(getRightRPM(), 1);
-    Serial.print(" RPM (target: ");
+    Serial.print(" RPM (target:\t");
     Serial.print(targetRightRPM, 1);
     Serial.println(")");
 
-    Serial.print("Pivot - Left: ");
+    Serial.print("Pivot - Left:\t");
     Serial.print(getLeftAngle() * 180.0f / PI, 1);
-    Serial.print("° (target: ");
+    Serial.print("° (target:\t");
     Serial.print(targetLeftAngle * 180.0f / PI, 1);
-    Serial.print(") | Right: ");
+    Serial.print(") | Right:\t");
     Serial.print(getRightAngle() * 180.0f / PI, 1);
-    Serial.print("° (target: ");
+    Serial.print("° (target:\t");
     Serial.print(targetRightAngle * 180.0f / PI, 1);
     Serial.println(")");
 }

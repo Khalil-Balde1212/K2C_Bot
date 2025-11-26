@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include <MotorInterface.h>
-#include "inverse_kinematics/inverse_kinematics.h"
+#include "inverse_kinematics.h"
 
 // PID Controller class
 class PIDController {
@@ -50,7 +50,9 @@ private:
     // State tracking
     float targetLeftRPM, targetRightRPM;
     float targetLeftAngle, targetRightAngle;
+    float leftPivotOffset, rightPivotOffset;  // Zero calibration offsets
     bool initialized;
+    unsigned long lastTime;
 
     // Conversion functions
     int rpmToPWM(float rpm);
@@ -84,6 +86,10 @@ public:
     float getRightRPM() const;
     float getLeftAngle() const;  // radians
     float getRightAngle() const; // radians
+
+    // Calibration
+    void calibratePivotZero();  // Set current position as zero angle
+    void resetPivotAngles();    // Reset target angles to current position
 
     // Debug
     void printStatus();

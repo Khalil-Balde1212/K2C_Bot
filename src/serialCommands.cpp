@@ -200,9 +200,13 @@ void serialCommands()
                         {
                             stopMainDemo();
                         }
+                        else if (command == "restart")
+                        {
+                            restartMainDemo();
+                        }
                     else
                     {
-                        Serial.println("Usage: demo [stop]");
+                        Serial.println("Usage: demo [stop|restart]");
                     }
                 }
                 else if (input.startsWith("demo2"))
@@ -221,6 +225,26 @@ void serialCommands()
                     {
                         Serial.println("Usage: demo2 [stop]");
                     }
+                }
+                else if (input == "claw open")
+                {
+                    robot.setEndEffectorAngle(90.0f);
+                    Serial.println("Claw opened");
+                }
+                else if (input == "claw close")
+                {
+                    robot.setEndEffectorAngle(0.0f);
+                    Serial.println("Claw closed");
+                }
+                else if (input == "arm up")
+                {
+                    robot.setArmServosAngle(0.0f);
+                    Serial.println("Arm moved up");
+                }
+                else if (input == "arm down")
+                {
+                    robot.setArmServosAngle(180.0f);
+                    Serial.println("Arm moved down");
                 }
                 break;
             }

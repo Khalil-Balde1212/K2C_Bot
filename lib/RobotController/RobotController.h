@@ -37,6 +37,11 @@ private:
     Motor* leftPivot;
     Motor* rightPivot;
 
+    // Servos for arm and end effector
+    Servo armServo1;  // First arm joint
+    Servo armServo2;  // Second arm joint
+    Servo endEffectorServo;  // Gripper or tool
+
     // PID Controllers
     PIDController leftDrivePID;
     PIDController rightDrivePID;
@@ -112,6 +117,13 @@ public:
     
     // IMU integration for Kalman filter
     void setIMUReference(IMUInterface* imuPtr);
+    
+    // Servo control for arm and end effector
+    void setArmServosAngle(float angle);  // degrees
+    void setEndEffectorAngle(float angle); // degrees
+    float getArmServo1Angle() const;
+    float getArmServo2Angle() const;
+    float getEndEffectorAngle() const;
     
     // Slip detection
     bool isSlipping() const { return velocityEstimator.isSlipping(); }

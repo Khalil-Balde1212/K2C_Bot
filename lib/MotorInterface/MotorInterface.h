@@ -55,4 +55,23 @@ private:
     float WheelDiameter; // inche
 };
 
+class Servo
+{
+public:
+    Servo(int channel, int minPulse = 500, int maxPulse = 2500);
+
+    void setAngle(float angle); // angle in degrees, 0-180
+    float getAngle() const;
+
+    void setPulse(int pulse); // direct pulse width in microseconds
+    int getPulse() const;
+
+private:
+    int channel;
+    int minPulseUs;
+    int maxPulseUs;
+    float currentAngle;
+    int currentPulse;
+};
+
 #endif  

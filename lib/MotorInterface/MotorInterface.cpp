@@ -148,3 +148,35 @@ const float *Motor::currentRPM() const
 {
     return &current_rpm;
 }
+
+// Servo implementation
+Servo::Servo(int channel, int minPulse, int maxPulse)
+    : channel(channel), minPulseUs(minPulse), maxPulseUs(maxPulse), currentAngle(90.0f), currentPulse(1500)
+{
+}
+
+void Servo::setAngle(float angle)
+{
+    currentAngle = constrain(angle, 0.0f, 180.0f);
+    currentPulse = map(currentAngle, 0, 180, minPulseUs, maxPulseUs);
+    int pwmValue = map(currentPulse, 0, 20000, 0, 4095); // 20ms period at 50Hz
+    Motor::pwmDriver.setPWM(channel, 0, pwmValue);
+}
+
+float Servo::getAngle() const
+{
+    return currentAngle;
+}
+
+void Servo::setPulse(int pulse)
+{
+    currentPulse = constrain(pulse, minPulseUs, maxPulseUs);
+    currentAngle = map(currentPulse, minPulseUs, maxPulseUs, 0, 180);
+    int pwmValue = map(currentPulse, 0, 20000, 0, 4095);
+    Motor::pwmDriver.setPWM(channel, 0, pwmValue);
+}
+
+int Servo::getPulse() const
+{
+    return currentPulse;
+}

@@ -37,6 +37,7 @@ void serialCommands();
 void debugPrints(unsigned long currentTime);
 void startMainDemo();
 void stopMainDemo();
+void restartMainDemo();
 void updateMainDemo(unsigned long currentTime);
 // Demo globals
 extern bool mainDemoEnabled;

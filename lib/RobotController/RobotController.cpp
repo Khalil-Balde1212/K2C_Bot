@@ -78,6 +78,7 @@ float PIDController::compute(float setpoint, float measurement, unsigned long cu
 // Robot Controller Implementation
 RobotController::RobotController(Motor *lm, Motor *rm, Motor *lp, Motor *rp)
     : leftMotor(lm), rightMotor(rm), leftPivot(lp), rightPivot(rp),
+      armServo1(10), armServo2(9), endEffectorServo(11),  // PCA9685 channels 8,9,11 for servos
       targetLeftRPM(0.0f), targetRightRPM(0.0f),
       targetLeftAngle(0.0f), targetRightAngle(0.0f),
       leftPivotOffset(0.0f), rightPivotOffset(0.0f),
@@ -570,4 +571,31 @@ int RobotController::angleToPWM(float angle_rad)
     float angle_deg = angle_rad * 57.2958f;
     int pwm = (int)(angle_deg * 45.5f); // Same as original conversion
     return constrain(pwm, -4096, 4096);
+}
+
+// Servo control methods
+void RobotController::setArmServosAngle(float angle)
+{
+    armServo1.setAngle(angle);
+    armServo2.setAngle(180-angle);
+}
+
+void RobotController::setEndEffectorAngle(float angle)
+{
+    endEffectorServo.setAngle(angle);
+}
+
+float RobotController::getArmServo1Angle() const
+{
+    return armServo1.getAngle();
+}
+
+float RobotController::getArmServo2Angle() const
+{
+    return armServo2.getAngle();
+}
+
+float RobotController::getEndEffectorAngle() const
+{
+    return endEffectorServo.getAngle();
 }

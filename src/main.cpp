@@ -146,6 +146,13 @@ void stopMainDemo()
     Serial.println("Main demo stopped.");
 }
 
+void restartMainDemo()
+{
+    stopMainDemo();
+    startMainDemo();
+    Serial.println("Main demo restarted.");
+}
+
 void updateMainDemo(unsigned long currentTime)
 {
     if (!mainDemoEnabled) return;

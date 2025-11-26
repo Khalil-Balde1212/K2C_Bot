@@ -20,9 +20,9 @@ bool imuAvailable = false; // Track if IMU initialized successfully
 TOF::TOFSensors tofSensors;
 
 // Control gains for heading control
-const float KP_HEADING = 0.5f;
-const float KI_HEADING = 0.01f;
-const float KD_HEADING = 0.1f;
+const float KP_HEADING = 1000.0f;
+const float KI_HEADING = 0.00f;
+const float KD_HEADING = 0.0f;
 
 // State
 unsigned long lastTime = 0;
@@ -308,6 +308,7 @@ void wallFollow()
 
     // Set steering angles directly instead of using serial command
     robot.setSteeringAngles(correction * PI / 180.0f, correction * PI / 180.0f);
+    processCommand("v2000"); // Maintain a speed of 0.2 m/s
 }
 
 void corridorFollow()
@@ -318,7 +319,7 @@ void corridorFollow()
 void loop()
 {
     unsigned long currentTime = millis();
-    // wallFollow();
+    wallFollow();
 
     if (imuAvailable && currentTime - lastTime > 10)
     {
@@ -345,8 +346,8 @@ void loop()
             float rightSpeed = desiredSpeed + headingCorrection;
             
             // Constrain speeds to reasonable limits
-            leftSpeed = constrain(leftSpeed, -50.0f, 50.0f);
-            rightSpeed = constrain(rightSpeed, -50.0f, 50.0f);
+            leftSpeed = constrain(leftSpeed, -1000.0f, 1000.0f);
+            rightSpeed = constrain(rightSpeed, -1000.0f, 1000.0f);
             
             robot.setWheelSpeeds(leftSpeed, rightSpeed);
         }

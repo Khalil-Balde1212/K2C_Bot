@@ -37,7 +37,7 @@ public:
     int encA, encB;
 
 private:
-
+    int deadband = 150; // Speed deadband
     float CountsPerRevolution;
     int currentRawSpeed;
     int currentCounts, lastCounts;

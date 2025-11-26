@@ -5,31 +5,37 @@ PIDController::PIDController(float p, float i, float d, float min, float max)
     : kp(p), ki(i), kd(d), integral(0.0f), prevError(0.0f),
       outputMin(min), outputMax(max), lastTime(0) {}
 
-void PIDController::setGains(float p, float i, float d) {
+void PIDController::setGains(float p, float i, float d)
+{
     kp = p;
     ki = i;
     kd = d;
 }
 
-void PIDController::setLimits(float min, float max) {
+void PIDController::setLimits(float min, float max)
+{
     outputMin = min;
     outputMax = max;
 }
 
-void PIDController::reset() {
+void PIDController::reset()
+{
     integral = 0.0f;
     prevError = 0.0f;
     lastTime = 0;
 }
 
-float PIDController::compute(float setpoint, float measurement, unsigned long currentTime) {
-    if (lastTime == 0) {
+float PIDController::compute(float setpoint, float measurement, unsigned long currentTime)
+{
+    if (lastTime == 0)
+    {
         lastTime = currentTime;
         return 0.0f;
     }
 
-    float dt = (currentTime - lastTime) / 1000.0f;  // Convert to seconds
-    if (dt <= 0.0f) return 0.0f;
+    float dt = (currentTime - lastTime) / 1000.0f; // Convert to seconds
+    if (dt <= 0.0f)
+        return 0.0f;
 
     float error = setpoint - measurement;
 
@@ -58,12 +64,13 @@ float PIDController::compute(float setpoint, float measurement, unsigned long cu
 }
 
 // Robot Controller Implementation
-RobotController::RobotController(Motor* lm, Motor* rm, Motor* lp, Motor* rp)
+RobotController::RobotController(Motor *lm, Motor *rm, Motor *lp, Motor *rp)
     : leftMotor(lm), rightMotor(rm), leftPivot(lp), rightPivot(rp),
       targetLeftRPM(0.0f), targetRightRPM(0.0f),
       targetLeftAngle(0.0f), targetRightAngle(0.0f),
       leftPivotOffset(0.0f), rightPivotOffset(0.0f),
-      initialized(false) {
+      initialized(false)
+{
 
     // Initialize PID controllers with reasonable defaults
     // Drive motors: Speed PID (RPM control)
@@ -75,18 +82,20 @@ RobotController::RobotController(Motor* lm, Motor* rm, Motor* lp, Motor* rp)
     rightPivotPID.setGains(15000.0f, 10.0f, 50.0f);
 }
 
-bool RobotController::begin() {
-    if (!leftMotor || !rightMotor || !leftPivot || !rightPivot) {
+bool RobotController::begin()
+{
+    if (!leftMotor || !rightMotor || !leftPivot || !rightPivot)
+    {
         Serial.println("ERROR: RobotController - Invalid motor pointers");
         return false;
     }
 
     // Configure motors (basic setup, detailed config done in main)
-    leftMotor->setCPR(COUNTS_PER_REV_DRIVE);
-    rightMotor->setCPR(COUNTS_PER_REV_DRIVE);
-    leftPivot->setCPR(COUNTS_PER_REV_PIVOT);
-    rightPivot->setCPR(COUNTS_PER_REV_PIVOT);
+    this->leftMotor->setCPR(2200.0f).invertMotor(true);
+    this->rightMotor->setCPR(2200.0f).invertEncoder(true);
 
+    this->leftPivot->setCPR(1440.0f).invertEncoder(true);
+    this->rightPivot->setCPR(1440.0f).invertEncoder(true);  
     // Stop all motors initially
     stop();
 
@@ -95,8 +104,10 @@ bool RobotController::begin() {
     return true;
 }
 
-void RobotController::setVelocity(float vx, float vy, float omega) {
-    if (!initialized) return;
+void RobotController::setVelocity(float vx, float vy, float omega)
+{
+    if (!initialized)
+        return;
 
     // Use inverse kinematics to convert velocity commands to wheel speeds and steering angles
     IK ik(vx, vy, omega);
@@ -109,31 +120,37 @@ void RobotController::setVelocity(float vx, float vy, float omega) {
     float leftRPM = (ik.wheel_speeds[0] + ik.wheel_speeds[2]) / 2.0f;
     float rightRPM = (ik.wheel_speeds[1] + ik.wheel_speeds[3]) / 2.0f;
 
-    setWheelSpeeds(leftRPM, -rightRPM);  // Right side needs negation
+    setWheelSpeeds(leftRPM, -rightRPM); // Right side needs negation
 }
 
-void RobotController::setWheelSpeeds(float leftRPM, float rightRPM) {
+void RobotController::setWheelSpeeds(float leftRPM, float rightRPM)
+{
     targetLeftRPM = leftRPM;
     targetRightRPM = rightRPM;
 }
 
-void RobotController::setSteeringAngles(float leftAngle, float rightAngle) {
+void RobotController::setSteeringAngles(float leftAngle, float rightAngle)
+{
     targetLeftAngle = leftAngle;
     targetRightAngle = rightAngle;
 }
 
-void RobotController::setDrivePIDGains(float kp, float ki, float kd) {
+void RobotController::setDrivePIDGains(float kp, float ki, float kd)
+{
     leftDrivePID.setGains(kp, ki, kd);
     rightDrivePID.setGains(kp, ki, kd);
 }
 
-void RobotController::setPivotPIDGains(float kp, float ki, float kd) {
+void RobotController::setPivotPIDGains(float kp, float ki, float kd)
+{
     leftPivotPID.setGains(kp, ki, kd);
     rightPivotPID.setGains(kp, ki, kd);
 }
 
-void RobotController::update(unsigned long currentTime) {
-    if (!initialized) return;
+void RobotController::update(unsigned long currentTime)
+{
+    if (!initialized)
+        return;
 
     // Update drive motors (speed control)
     float currentLeftRPM = *leftMotor->currentRPM();
@@ -157,13 +174,14 @@ void RobotController::update(unsigned long currentTime) {
     rightPivot->setRawSpeed(rightPivotPWM);
 
     // Update motor states
-    leftMotor->update(currentTime - 10, currentTime);
-    rightMotor->update(currentTime - 10, currentTime);
-    leftPivot->update(currentTime - 10, currentTime);
-    rightPivot->update(currentTime - 10, currentTime);
+    leftMotor->update(currentTime);
+    rightMotor->update(currentTime);
+    leftPivot->update(currentTime);
+    rightPivot->update(currentTime);
 }
 
-void RobotController::stop() {
+void RobotController::stop()
+{
     targetLeftRPM = 0.0f;
     targetRightRPM = 0.0f;
     targetLeftAngle = 0.0f;
@@ -181,7 +199,8 @@ void RobotController::stop() {
     rightPivotPID.reset();
 }
 
-void RobotController::emergencyStop() {
+void RobotController::emergencyStop()
+{
     // Immediate stop without PID reset
     leftMotor->setRawSpeed(0);
     rightMotor->setRawSpeed(0);
@@ -189,37 +208,45 @@ void RobotController::emergencyStop() {
     rightPivot->setRawSpeed(0);
 }
 
-float RobotController::getLeftRPM() const {
+float RobotController::getLeftRPM() const
+{
     return initialized ? *leftMotor->currentRPM() : 0.0f;
 }
 
-float RobotController::getRightRPM() const {
+float RobotController::getRightRPM() const
+{
     return initialized ? *rightMotor->currentRPM() : 0.0f;
 }
 
-float RobotController::getLeftAngle() const {
-    if (!initialized) return 0.0f;
+float RobotController::getLeftAngle() const
+{
+    if (!initialized)
+        return 0.0f;
     int counts = *leftPivot->getCounts();
     float rawAngle = (counts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
     return rawAngle - leftPivotOffset;
 }
 
-float RobotController::getRightAngle() const {
-    if (!initialized) return 0.0f;
+float RobotController::getRightAngle() const
+{
+    if (!initialized)
+        return 0.0f;
     int counts = *rightPivot->getCounts();
     float rawAngle = (counts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
     return rawAngle - rightPivotOffset;
 }
 
-void RobotController::calibratePivotZero() {
-    if (!initialized) return;
-    
+void RobotController::calibratePivotZero()
+{
+    if (!initialized)
+        return;
+
     int leftCounts = *leftPivot->getCounts();
     int rightCounts = *rightPivot->getCounts();
-    
+
     leftPivotOffset = (leftCounts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
     rightPivotOffset = (rightCounts / COUNTS_PER_REV_PIVOT) * 2.0f * PI;
-    
+
     Serial.print("Pivot zero calibrated - Left offset: ");
     Serial.print(leftPivotOffset * 180.0f / PI, 1);
     Serial.print("°, Right offset: ");
@@ -227,14 +254,17 @@ void RobotController::calibratePivotZero() {
     Serial.println("°");
 }
 
-void RobotController::resetPivotAngles() {
+void RobotController::resetPivotAngles()
+{
     targetLeftAngle = getLeftAngle();
     targetRightAngle = getRightAngle();
     Serial.println("Pivot target angles reset to current position");
 }
 
-void RobotController::printStatus() {
-    if (!initialized) {
+void RobotController::printStatus()
+{
+    if (!initialized)
+    {
         Serial.println("RobotController: Not initialized");
         return;
     }
@@ -260,16 +290,18 @@ void RobotController::printStatus() {
     Serial.println(")");
 }
 
-int RobotController::rpmToPWM(float rpm) {
+int RobotController::rpmToPWM(float rpm)
+{
     float normalizedRPM = rpm / MAX_RPM;
     int pwm = (int)(normalizedRPM * 4096.0f);
     return constrain(pwm, -4096, 4096);
 }
 
-int RobotController::angleToPWM(float angle_rad) {
+int RobotController::angleToPWM(float angle_rad)
+{
     // This is a simplified conversion - you may need to tune this
     // based on your specific steering mechanism
     float angle_deg = angle_rad * 57.2958f;
-    int pwm = (int)(angle_deg * 45.5f);  // Same as original conversion
+    int pwm = (int)(angle_deg * 45.5f); // Same as original conversion
     return constrain(pwm, -4096, 4096);
 }

@@ -59,11 +59,6 @@ void setup()
     // Init motors
     Serial.println("Initializing motors...");
     Motor::begin();
-    leftMotor.setCPR(2200.0f).invertMotor(true);
-    rightMotor.setCPR(2200.0f).invertMotor(true);
-
-    leftPivot.setCPR(1440.0f);
-    rightPivot.setCPR(1440.0f);
 
     // Encoder interrupts
     attachInterrupt(digitalPinToInterrupt(leftMotor.encA), []()
@@ -199,40 +194,6 @@ void loop()
             Serial.println(desiredSpeed);
             break;
         }
-        case 'l':
-        {
-            desiredSpeed = input.substring(1).toFloat();
-            robot.setWheelSpeeds(desiredSpeed, robot.getRightRPM());
-            Serial.print("Left Motor Speed: ");
-            Serial.println(desiredSpeed);
-            break;
-        }
-        case 'r':
-        {
-            desiredSpeed = input.substring(1).toFloat();
-            robot.setWheelSpeeds(robot.getLeftRPM(), desiredSpeed);
-            Serial.print("Right Motor Speed: ");
-            Serial.println(desiredSpeed);
-            break;
-        }
-        case 'p':
-        {
-            desiredSpeed = input.substring(1).toFloat();
-            float angle_rad = desiredSpeed * PI / 180.0f; // Convert degrees to radians
-            robot.setSteeringAngles(angle_rad, robot.getRightAngle());
-            Serial.print("Left Pivot Angle: ");
-            Serial.println(desiredSpeed);
-            break;
-        }
-        case 'q':
-        {
-            desiredSpeed = input.substring(1).toFloat();
-            float angle_rad = desiredSpeed * PI / 180.0f; // Convert degrees to radians
-            robot.setSteeringAngles(robot.getLeftAngle(), angle_rad);
-            Serial.print("Right Pivot Angle: ");
-            Serial.println(desiredSpeed);
-            break;
-        }
         case 'a':
         {
             char side = input.charAt(1);
@@ -339,11 +300,38 @@ void loop()
         // Serial.println(")");
 
         // Robot controller status
-        robot.printStatus();
+        // robot.printStatus();
 
+        Serial.print("leftPivot Counts:\t");
+        Serial.print(*leftPivot.getCounts());
+        Serial.print(" | rightPivot Counts:\t");
+        Serial.print(*rightPivot.getCounts());
+        Serial.print(" | leftMotor Counts:\t");
+        Serial.print(*leftMotor.getCounts());
+        Serial.print(" | rightMotor Counts:\t");
+        Serial.print(*rightMotor.getCounts());
+        Serial.print(" | leftMotor Speed:\t");
+        Serial.print(*leftMotor.getSpeed());
+        Serial.print(" | rightMotor Speed:\t");
+        Serial.print(*rightMotor.getSpeed());
+        Serial.print(" | leftPivot Speed:\t");
+        Serial.print(*leftPivot.getSpeed());
+        Serial.print(" | rightPivot Speed:\t");
+        Serial.print(*rightPivot.getSpeed());
+        Serial.println();
         // Update last time for next iteration
-        lastTime = currentTime;
     }
+    // Test motor directions - set all motors to positive speed
+    leftMotor.setRawSpeed(4000);   // Positive speed
+    rightMotor.setRawSpeed(4000);  // Positive speed  
+    leftPivot.setRawSpeed(0);   // Positive speed
+    rightPivot.setRawSpeed(0);  // Positive speed
+
     // Update robot controller
-    robot.update(currentTime);
+    // robot.update(currentTime);
+    leftMotor.update(currentTime);
+    rightMotor.update(currentTime);
+    leftPivot.update(currentTime);
+    rightPivot.update(currentTime);
+    lastTime = currentTime;
 }

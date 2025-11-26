@@ -11,9 +11,9 @@ void Motor::begin()
     Serial.println("Motor PWM Driver Initialized");
 }
 
-void Motor::update(unsigned long lastTime, unsigned long currentTime)
+void Motor::update(unsigned long currentTime)
 {
-    unsigned long deltaTime = currentTime - lastTime; // in milliseconds
+    unsigned long deltaTime = currentTime - lastUpdateTime; // in milliseconds
 
     // Calculate RPM
     int deltaCounts = currentCounts - lastCounts;
@@ -49,6 +49,7 @@ void Motor::update(unsigned long lastTime, unsigned long currentTime)
         pwmDriver.setPWM(motorA, 0, 4095);
         pwmDriver.setPWM(motorB, 0, 4095);
     }
+    this->lastUpdateTime = millis();
 }
 
 Motor::Motor(int motorPortA, int motorPortB, int encoderPortA, int encoderPortB)
@@ -72,6 +73,7 @@ Motor::Motor(int motorPortA, int motorPortB, int encoderPortA, int encoderPortB)
     currentVelocity = 0.0f;
     WheelDiameter = 0.0f;
     speed = 0;
+    lastUpdateTime = millis();
 }
 
 Motor Motor::invertMotor(bool inverted)
@@ -145,4 +147,3 @@ const int *Motor::getCounts() const
 const float *Motor::currentRPM() const
 {
     return &current_rpm;
-}

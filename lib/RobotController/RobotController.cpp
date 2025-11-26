@@ -93,11 +93,14 @@ bool RobotController::begin()
     // Configure motors (basic setup, detailed config done in main)
     this->leftMotor->setCPR(2200.0f).invertMotor(true);
     this->rightMotor->setCPR(2200.0f).invertEncoder(true);
+    this->rightMotor->invertMotor(true);
 
-    this->leftPivot->setCPR(1440.0f).invertEncoder(true);
-    this->rightPivot->setCPR(1440.0f).invertEncoder(true);  
+    this->leftPivot->setCPR(1440.0f);
+    this->rightPivot->setCPR(1440.0f);  
+    this->leftPivot->invertEncoder(true);
+    this->rightPivot->invertEncoder(true);
     // Stop all motors initially
-    stop();
+    // stop();
 
     initialized = true;
     Serial.println("RobotController initialized successfully");

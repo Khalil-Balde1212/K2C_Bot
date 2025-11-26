@@ -147,3 +147,4 @@ const int *Motor::getCounts() const
 const float *Motor::currentRPM() const
 {
     return &current_rpm;
+}

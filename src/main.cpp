@@ -300,38 +300,29 @@ void loop()
         // Serial.println(")");
 
         // Robot controller status
-        // robot.printStatus();
+        robot.printStatus();
 
-        Serial.print("leftPivot Counts:\t");
-        Serial.print(*leftPivot.getCounts());
-        Serial.print(" | rightPivot Counts:\t");
-        Serial.print(*rightPivot.getCounts());
-        Serial.print(" | leftMotor Counts:\t");
-        Serial.print(*leftMotor.getCounts());
-        Serial.print(" | rightMotor Counts:\t");
-        Serial.print(*rightMotor.getCounts());
-        Serial.print(" | leftMotor Speed:\t");
-        Serial.print(*leftMotor.getSpeed());
-        Serial.print(" | rightMotor Speed:\t");
-        Serial.print(*rightMotor.getSpeed());
-        Serial.print(" | leftPivot Speed:\t");
-        Serial.print(*leftPivot.getSpeed());
-        Serial.print(" | rightPivot Speed:\t");
-        Serial.print(*rightPivot.getSpeed());
-        Serial.println();
+        // Serial.print("leftPivot Counts:\t");
+        // Serial.print(*leftPivot.getCounts());
+        // Serial.print(" | rightPivot Counts:\t");
+        // Serial.print(*rightPivot.getCounts());
+        // Serial.print(" | leftMotor Counts:\t");
+        // Serial.print(*leftMotor.getCounts());
+        // Serial.print(" | rightMotor Counts:\t");
+        // Serial.print(*rightMotor.getCounts());
+        // Serial.print(" | leftMotor Speed:\t");
+        // Serial.print(*leftMotor.getSpeed());
+        // Serial.print(" | rightMotor Speed:\t");
+        // Serial.print(*rightMotor.getSpeed());
+        // Serial.print(" | leftPivot Speed:\t");
+        // Serial.print(*leftPivot.getSpeed());
+        // Serial.print(" | rightPivot Speed:\t");
+        // Serial.print(*rightPivot.getSpeed());
+        // Serial.println();
         // Update last time for next iteration
     }
-    // Test motor directions - set all motors to positive speed
-    leftMotor.setRawSpeed(4000);   // Positive speed
-    rightMotor.setRawSpeed(4000);  // Positive speed  
-    leftPivot.setRawSpeed(0);   // Positive speed
-    rightPivot.setRawSpeed(0);  // Positive speed
 
-    // Update robot controller
-    // robot.update(currentTime);
-    leftMotor.update(currentTime);
-    rightMotor.update(currentTime);
-    leftPivot.update(currentTime);
-    rightPivot.update(currentTime);
+    robot.update(currentTime);
+
     lastTime = currentTime;
 }

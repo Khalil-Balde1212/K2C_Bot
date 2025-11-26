@@ -83,6 +83,11 @@ public:
     float getMx() const { return mx; }
     float getMy() const { return my; }
     float getMz() const { return mz; }
+    
+    // Get acceleration values (for velocity estimation)
+    float getAccelX() const { return ax; }
+    float getAccelY() const { return ay; }
+    float getAccelZ() const { return az; }
 
     // Additional methods for compatibility
     float getHeading() const { return getYaw(); }

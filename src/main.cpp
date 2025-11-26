@@ -109,6 +109,9 @@ void setup()
 
         imuAvailable = true;
         Serial.println("IMU calibrated!");
+        
+        // Connect IMU to robot controller for Kalman filter
+        robot.setIMUReference(&imu);
     }
 
     // Initialize FK at origin
@@ -137,8 +140,10 @@ void setup()
         tofSensors.setSensorOffset(1, 11.0f); // Right sensor offset
     }
 
+
     Serial.println("=== Ready! ===");
     Serial.println("Commands: v<speed>, h<heading>, l<rpm>, r<rpm>, p<angle_deg>, q<angle_deg>, al<angle>, ar<angle>, stop, reset, magcal, pivotzero, pivotreset, status");
+    Serial.println("Velocity Control: velctl on/off, veltarget <vx> <vy> <omega>, velgains <kp> <ki> <kd>");
 }
 
 // Execute motion using Robot Controller
@@ -177,8 +182,87 @@ void loop()
         String input = Serial.readStringUntil('\n');
         input.trim();
 
-        switch (input.charAt(0))
+        // Check for velocity control commands first (before switch statement)
+        // to avoid conflict with 'v' speed command
+        if (input.startsWith("velctl"))
         {
+            String command = input.substring(7);
+            command.trim();
+            if (command == "on")
+            {
+                robot.enableVelocityControl(true);
+            }
+            else if (command == "off")
+            {
+                robot.enableVelocityControl(false);
+            }
+            else
+            {
+                Serial.println("Usage: velctl on/off");
+            }
+        }
+        else if (input.startsWith("veltarget"))
+        {
+            // Parse: veltarget <vx> <vy> <omega>
+            String params = input.substring(10);
+            params.trim();
+            
+            int firstSpace = params.indexOf(' ');
+            int secondSpace = params.indexOf(' ', firstSpace + 1);
+            
+            if (firstSpace > 0 && secondSpace > 0)
+            {
+                float vx = params.substring(0, firstSpace).toFloat();
+                float vy = params.substring(firstSpace + 1, secondSpace).toFloat();
+                float omega = params.substring(secondSpace + 1).toFloat();
+                
+                robot.setTargetVelocity(vx, vy, omega);
+                Serial.print("Target velocity set: vx=");
+                Serial.print(vx, 3);
+                Serial.print(" m/s, vy=");
+                Serial.print(vy, 3);
+                Serial.print(" m/s, omega=");
+                Serial.print(omega, 3);
+                Serial.println(" rad/s");
+            }
+            else
+            {
+                Serial.println("Usage: veltarget <vx> <vy> <omega>");
+            }
+        }
+        else if (input.startsWith("velgains"))
+        {
+            // Parse: velgains <kp> <ki> <kd> (applies to all three controllers)
+            String params = input.substring(9);
+            params.trim();
+            
+            int firstSpace = params.indexOf(' ');
+            int secondSpace = params.indexOf(' ', firstSpace + 1);
+            
+            if (firstSpace > 0 && secondSpace > 0)
+            {
+                float kp = params.substring(0, firstSpace).toFloat();
+                float ki = params.substring(firstSpace + 1, secondSpace).toFloat();
+                float kd = params.substring(secondSpace + 1).toFloat();
+                
+                robot.setVelocityControlGains(kp, ki, kd, kp, ki, kd, kp, ki, kd);
+                Serial.print("Velocity PID gains set: kp=");
+                Serial.print(kp, 2);
+                Serial.print(", ki=");
+                Serial.print(ki, 2);
+                Serial.print(", kd=");
+                Serial.println(kd, 2);
+            }
+            else
+            {
+                Serial.println("Usage: velgains <kp> <ki> <kd>");
+            }
+        }
+        else
+        {
+            // Standard character-based commands
+            switch (input.charAt(0))
+            {
         case 'h':
         {
             targetHeading = input.substring(1).toFloat();
@@ -271,7 +355,14 @@ void loop()
             {
                 robot.resetPivotAngles();
             }
+            else if (input == "quiet")
+            {
+                quietMode = !quietMode;
+                Serial.print("Quiet mode: ");
+                Serial.println(quietMode ? "ON" : "OFF");
+            }
             break;
+        }
         }
         }
     }

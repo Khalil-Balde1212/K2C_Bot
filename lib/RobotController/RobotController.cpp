@@ -393,12 +393,11 @@ void RobotController::updateVelocityEstimate(unsigned long currentTime)
     float leftWheelVel = (leftDelta / COUNTS_PER_REV_DRIVE) * (2.0f * PI * WHEEL_RADIUS) / dt;
     float rightWheelVel = (rightDelta / COUNTS_PER_REV_DRIVE) * (2.0f * PI * WHEEL_RADIUS) / dt;
 
-    // Differential drive kinematics
+    // Differential drive kinematics for forward velocity
     const float WHEELBASE = 0.074f; // meters
     
     // Calculate encoder-based forward velocity
     float encoderVx = (leftWheelVel + rightWheelVel) / 2.0f;
-    float rawOmega = (rightWheelVel - leftWheelVel) / WHEELBASE;
     
     // Store raw encoder velocity for debug/slip detection
     rawEncoderVx = encoderVx;
@@ -406,16 +405,46 @@ void RobotController::updateVelocityEstimate(unsigned long currentTime)
     // Update Kalman filter with encoder measurement
     velocityEstimator.update(encoderVx, currentTime);
     
-    // TEMPORARY: Use raw encoder velocity directly (Kalman filter has bugs)
-    // TODO: Debug Kalman filter - it's not properly fusing encoder + IMU
-    currentVx = encoderVx;  // Use raw encoder instead of velocityEstimator.getVelocity()
+    // Use Kalman filtered velocity (proper state-space model with IMU fusion)
+    currentVx = velocityEstimator.getVelocity();
     
-    // Apply smoothing filter to omega
-    const float alpha = 0.3f;
-    currentOmega = alpha * rawOmega + (1.0f - alpha) * currentOmega;
+    // Omega: Use gyroscope if available (more accurate than encoder diff)
+    if (imu != nullptr)
+    {
+        // Gyroscope Z-axis gives yaw rate (omega)
+        // Apply light filtering
+        const float alpha = 0.3f;
+        float gyroOmega = imu->getGyroZ();  // rad/s
+        currentOmega = alpha * gyroOmega + (1.0f - alpha) * currentOmega;
+    }
+    else
+    {
+        // Fallback to encoder-based omega
+        float rawOmega = (rightWheelVel - leftWheelVel) / WHEELBASE;
+        const float alpha = 0.3f;
+        currentOmega = alpha * rawOmega + (1.0f - alpha) * currentOmega;
+    }
     
-    // Lateral velocity (vy) - simplified for differential drive
-    currentVy = 0.0f;
+    // Vy: Calculate from wheel velocities and steering angles
+    // For swerve drive: vy depends on steering configuration
+    // Simplified: if wheels are perpendicular (±90°), vy = average wheel velocity
+    float leftAngle = getLeftAngle();
+    float rightAngle = getRightAngle();
+    
+    // If both wheels are near 90° (perpendicular), we're in lateral motion mode
+    if (fabs(leftAngle) > PI/4.0f && fabs(rightAngle) > PI/4.0f)
+    {
+        // Wheels perpendicular → lateral motion
+        currentVy = (leftWheelVel + rightWheelVel) / 2.0f;
+    }
+    else
+    {
+        // Estimate lateral component from steering angles
+        // vy ~ wheel_vel * sin(angle)
+        float leftVy = leftWheelVel * sin(leftAngle);
+        float rightVy = rightWheelVel * sin(rightAngle);
+        currentVy = (leftVy + rightVy) / 2.0f;
+    }
 
     // Update encoder counts for next iteration
     lastLeftDriveCounts = currentLeftCounts;
@@ -431,40 +460,31 @@ void RobotController::updateVelocityControl(unsigned long currentTime)
     // Update velocity estimate
     updateVelocityEstimate(currentTime);
 
-    // Compute PID corrections
+    // Compute PID corrections for all 3 DOF
     float vxCorrection = vxPID.compute(targetVx, currentVx, currentTime);
+    float vyCorrection = vyPID.compute(targetVy, currentVy, currentTime);
     float omegaCorrection = omegaPID.compute(targetOmega, currentOmega, currentTime);
 
-    // Apply corrections to target velocities (vy not used in differential drive)
+    // Apply corrections to target velocities
     float correctedVx = targetVx + vxCorrection;
+    float correctedVy = targetVy + vyCorrection;
     float correctedOmega = targetOmega + omegaCorrection;
+    
+    // Apply deadband to prevent tiny noise from changing IK mode
+    // Only zero out if BOTH target AND corrected value are small
+    const float VEL_DEADBAND = 0.02f;   // m/s
+    const float OMEGA_DEADBAND = 0.08f;  // rad/s - balanced for noise filtering vs responsiveness
+    
+    if (fabs(correctedVx) < VEL_DEADBAND && fabs(targetVx) < VEL_DEADBAND)
+        correctedVx = 0.0f;
+    if (fabs(correctedVy) < VEL_DEADBAND && fabs(targetVy) < VEL_DEADBAND)
+        correctedVy = 0.0f;
+    if (fabs(correctedOmega) < OMEGA_DEADBAND && fabs(targetOmega) < OMEGA_DEADBAND)
+        correctedOmega = 0.0f;
 
-    // Convert corrected velocities to wheel speeds using simplified differential drive model
-    // For swerve drive, we should NOT recalculate steering angles in the control loop
-    // Instead, set steering angles once at the beginning, then only adjust wheel speeds
-    
-    // Use differential drive approximation: 
-    // Left wheel velocity = vx - omega * (wheelbase/2)
-    // Right wheel velocity = vx + omega * (wheelbase/2)
-    const float WHEELBASE = 0.074f; // meters
-    const float wheelCircumference = 2.0f * PI * WHEEL_RADIUS;
-    
-    float leftWheelSpeed = correctedVx - (correctedOmega * WHEELBASE / 2.0f);  // m/s
-    float rightWheelSpeed = correctedVx + (correctedOmega * WHEELBASE / 2.0f); // m/s
-    
-    // Convert to RPM: (m/s) / (m/rev) * 60 s/min = RPM
-    // Negate to match motor/encoder convention (positive RPM = forward)
-    float leftRPM = -(leftWheelSpeed / wheelCircumference) * 60.0f;
-    float rightRPM = -(rightWheelSpeed / wheelCircumference) * 60.0f;
-    
-    // Set wheel speeds directly without changing steering angles
-    // Note: Right side negation is already handled in setWheelSpeeds for inverse kinematics mode
-    // In velocity control mode (differential drive), we want both wheels spinning the same direction for forward
-    setWheelSpeeds(leftRPM, rightRPM);
-    
-    // Set steering to straight ahead (0 degrees) when in velocity control mode
-    // This prevents the steering from oscillating
-    setSteeringAngles(0.0f, 0.0f);
+    // Use full swerve drive inverse kinematics for complete 3-DOF control
+    // This properly calculates both wheel speeds AND steering angles
+    setVelocity(correctedVx, correctedVy, correctedOmega);
 }
 
 void RobotController::printStatus()
@@ -498,14 +518,25 @@ void RobotController::printStatus()
     // Show velocity control status if enabled
     if (velocityControlEnabled)
     {
-        Serial.print("Vx:\t");
+        Serial.print("Vel - Vx:\t");
         Serial.print(currentVx, 3);
-        Serial.print(" | Enc_raw: ");
+        Serial.print(" (tgt:\t");
+        Serial.print(targetVx, 3);
+        Serial.print(") | Vy:\t");
+        Serial.print(currentVy, 3);
+        Serial.print(" (tgt:\t");
+        Serial.print(targetVy, 3);
+        Serial.print(") | Ω:\t");
+        Serial.print(currentOmega, 3);
+        Serial.print(" (tgt:\t");
+        Serial.print(targetOmega, 3);
+        Serial.print(")");
+        
+        // Show Kalman filter debug info
+        Serial.print(" | Enc: ");
         Serial.print(rawEncoderVx, 3);
-        Serial.print(" | KF_vx: ");
+        Serial.print(" KF: ");
         Serial.print(velocityEstimator.getVelocity(), 3);
-        Serial.print(" | IMU_vx: ");
-        Serial.print(velocityEstimator.getIMUVelocity(), 3);
         
         // DEBUG: Show raw IMU acceleration to verify it's being read
         if (imu != nullptr)
@@ -514,12 +545,11 @@ void RobotController::printStatus()
             Serial.print(-imu->getAccelY(), 3);  // Negated for forward
         }
         
-        Serial.print(" | Slip: ");
-        Serial.print(velocityEstimator.getSlipAmount(), 3);
-        
+        // Show slip detection
         if (velocityEstimator.isSlipping())
         {
-            Serial.print(" ⚠️");
+            Serial.print(" | ⚠️ SLIP: ");
+            Serial.print(velocityEstimator.getSlipAmount(), 2);
         }
         
         Serial.println();

@@ -1,18 +1,28 @@
 #include "VelocityEstimator.h"
 
 VelocityEstimator::VelocityEstimator()
-    : kf_vx(0.0f),
-      kf_P(1.0f),
-      kf_Q(0.01f),           // Process noise - tune based on robot dynamics
-      kf_R_encoder(0.05f),   // Encoder noise - relatively low
-      kf_R_imu(0.2f),        // IMU noise - higher due to integration drift
+    : kf_position(0.0f),
+      kf_velocity(0.0f),
+      kf_R(0.05f),           // Encoder velocity measurement noise
       imu_vx(0.0f),
+      imu_position(0.0f),
       lastUpdate(0),
       slipDetected(false),
       slipThreshold(0.15f),  // 0.15 m/s difference indicates slip
       slipAmount(0.0f),
       imu(nullptr)
 {
+    // Initialize covariance matrix P (state uncertainty)
+    kf_P[0][0] = 1.0f;  // Position variance
+    kf_P[0][1] = 0.0f;
+    kf_P[1][0] = 0.0f;
+    kf_P[1][1] = 1.0f;  // Velocity variance
+    
+    // Initialize process noise Q
+    kf_Q[0][0] = 0.001f;  // Position process noise
+    kf_Q[0][1] = 0.0f;
+    kf_Q[1][0] = 0.0f;
+    kf_Q[1][1] = 0.01f;   // Velocity process noise
 }
 
 void VelocityEstimator::setIMU(IMUInterface* imuPtr)
@@ -20,11 +30,11 @@ void VelocityEstimator::setIMU(IMUInterface* imuPtr)
     imu = imuPtr;
 }
 
-void VelocityEstimator::setNoiseParams(float Q, float R_enc, float R_imu)
+void VelocityEstimator::setNoiseParams(float Q_pos, float Q_vel, float R_meas)
 {
-    kf_Q = Q;
-    kf_R_encoder = R_enc;
-    kf_R_imu = R_imu;
+    kf_Q[0][0] = Q_pos;
+    kf_Q[1][1] = Q_vel;
+    kf_R = R_meas;
 }
 
 void VelocityEstimator::setSlipThreshold(float threshold)
@@ -32,13 +42,13 @@ void VelocityEstimator::setSlipThreshold(float threshold)
     slipThreshold = threshold;
 }
 
-void VelocityEstimator::update(float encoderVx, unsigned long currentTime)
+void VelocityEstimator::update(float encoderVelocity, unsigned long currentTime)
 {
     // Initialize on first call
     if (lastUpdate == 0)
     {
         lastUpdate = currentTime;
-        kf_vx = encoderVx;
+        kf_velocity = encoderVelocity;
         imu_vx = 0.0f;
         return;
     }
@@ -52,93 +62,131 @@ void VelocityEstimator::update(float encoderVx, unsigned long currentTime)
     float ax = 0.0f;
     if (imu != nullptr)
     {
-        // IMPORTANT: IMU orientation on Nano 33 BLE 
-        // +Y points backward, so forward acceleration is -ay
+        // IMU orientation: +Y points backward, so forward acceleration is -ay
         ax = -imu->getAccelY();
     }
     
-    // 1. Kalman Prediction Step (using IMU acceleration)
+    // 1. Kalman Prediction Step (using IMU acceleration as control input)
     kalmanPredict(ax, dt);
     
-    // 2. Update IMU integrated velocity
+    // 2. Update IMU integrated velocity (for comparison/debugging)
     updateIMUVelocity(ax, dt);
     
-    // 3. Kalman Update Step (fusing encoder measurement)
-    kalmanUpdate(encoderVx);
+    // 3. Kalman Update Step (using encoder velocity measurement)
+    kalmanUpdate(encoderVelocity, dt);
     
     // 4. Detect slip
-    detectSlip(encoderVx);
+    detectSlip(encoderVelocity);
     
     lastUpdate = currentTime;
 }
 
 void VelocityEstimator::kalmanPredict(float ax, float dt)
 {
-    // State prediction: vx(k+1) = vx(k) + ax * dt
-    kf_vx = kf_vx + ax * dt;
+    // State prediction: X_k = F * X_k-1 + B * u
+    // F = [[1, dt], [0, 1]]  (state transition)
+    // B = [[0.5*dt²], [dt]]  (control input matrix)
+    // u = ax (IMU acceleration)
     
-    // Covariance prediction: P(k+1) = P(k) + Q
-    kf_P = kf_P + kf_Q;
+    float new_position = kf_position + kf_velocity * dt + 0.5f * ax * dt * dt;
+    float new_velocity = kf_velocity + ax * dt;
+    
+    // Covariance prediction: P_k = F * P_k-1 * F^T + Q
+    float F[2][2] = {{1.0f, dt}, {0.0f, 1.0f}};
+    
+    // P_temp = F * P
+    float P_temp[2][2];
+    P_temp[0][0] = F[0][0] * kf_P[0][0] + F[0][1] * kf_P[1][0];
+    P_temp[0][1] = F[0][0] * kf_P[0][1] + F[0][1] * kf_P[1][1];
+    P_temp[1][0] = F[1][0] * kf_P[0][0] + F[1][1] * kf_P[1][0];
+    P_temp[1][1] = F[1][0] * kf_P[0][1] + F[1][1] * kf_P[1][1];
+    
+    // P_new = P_temp * F^T + Q
+    kf_P[0][0] = P_temp[0][0] * F[0][0] + P_temp[0][1] * F[0][1] + kf_Q[0][0];
+    kf_P[0][1] = P_temp[0][0] * F[1][0] + P_temp[0][1] * F[1][1];
+    kf_P[1][0] = P_temp[1][0] * F[0][0] + P_temp[1][1] * F[0][1];
+    kf_P[1][1] = P_temp[1][0] * F[1][0] + P_temp[1][1] * F[1][1] + kf_Q[1][1];
+    
+    // Update state
+    kf_position = new_position;
+    kf_velocity = new_velocity;
 }
 
-void VelocityEstimator::kalmanUpdate(float encoderVx)
+void VelocityEstimator::kalmanUpdate(float encoderVelocity, float dt)
 {
-    // Innovation (measurement residual)
-    float y = encoderVx - kf_vx;
+    // Measurement model: H = [[0, 1]] (we measure velocity directly)
+    // Innovation: y = z - H * X
+    float innovation = encoderVelocity - kf_velocity;
     
-    // Innovation covariance
-    float S = kf_P + kf_R_encoder;
+    // Innovation covariance: S = H * P * H^T + R
+    // Since H = [[0, 1]], this simplifies to S = P[1][1] + R
+    float S = kf_P[1][1] + kf_R;
     
-    // Kalman gain
-    float K = kf_P / S;
+    // Kalman gain: K = P * H^T / S
+    float K[2];
+    K[0] = kf_P[0][1] / S;  // P[0][1] / S
+    K[1] = kf_P[1][1] / S;  // P[1][1] / S
     
-    // State update
-    kf_vx = kf_vx + K * y;
+    // State update: X = X + K * innovation
+    kf_position = kf_position + K[0] * innovation;
+    kf_velocity = kf_velocity + K[1] * innovation;
     
-    // Covariance update
-    kf_P = (1.0f - K) * kf_P;
+    // Covariance update: P = (I - K * H) * P
+    // Since H = [[0, 1]], this simplifies:
+    float P_new[2][2];
+    P_new[0][0] = kf_P[0][0] - K[0] * kf_P[1][0];
+    P_new[0][1] = kf_P[0][1] - K[0] * kf_P[1][1];
+    P_new[1][0] = kf_P[1][0] - K[1] * kf_P[1][0];
+    P_new[1][1] = kf_P[1][1] - K[1] * kf_P[1][1];
     
-    // Ensure covariance doesn't go to zero (numerical stability)
-    if (kf_P < 0.001f)
-        kf_P = 0.001f;
+    // Copy back
+    kf_P[0][0] = P_new[0][0];
+    kf_P[0][1] = P_new[0][1];
+    kf_P[1][0] = P_new[1][0];
+    kf_P[1][1] = P_new[1][1];
+    
+    // Ensure covariance doesn't collapse to zero
+    if (kf_P[0][0] < 0.0001f) kf_P[0][0] = 0.0001f;
+    if (kf_P[1][1] < 0.0001f) kf_P[1][1] = 0.0001f;
 }
 
 void VelocityEstimator::updateIMUVelocity(float ax, float dt)
 {
     // Simple integration with exponential decay to prevent drift
-    // This provides a second velocity estimate for comparison
-    const float decay = 0.98f; // Slight decay to prevent unbounded drift
+    const float decay = 0.98f;
     imu_vx = decay * imu_vx + ax * dt;
+    imu_position = imu_position + imu_vx * dt;
     
-    // Reset if velocity is very small (robot stopped)
-    if (fabs(imu_vx) < 0.01f && fabs(kf_vx) < 0.01f)
+    // Reset if velocity is very small
+    if (fabs(imu_vx) < 0.01f && fabs(kf_velocity) < 0.01f)
     {
         imu_vx = 0.0f;
     }
 }
 
-void VelocityEstimator::detectSlip(float encoderVx)
+void VelocityEstimator::detectSlip(float encoderVelocity)
 {
     // Compare encoder velocity vs. Kalman filtered velocity
     // If encoder >> Kalman, wheels are slipping
-    slipAmount = encoderVx - kf_vx;
+    slipAmount = encoderVelocity - kf_velocity;
     
     // Detect slip when difference exceeds threshold
-    if (fabs(slipAmount) > slipThreshold)
-    {
-        slipDetected = true;
-    }
-    else
-    {
-        slipDetected = false;
-    }
+    slipDetected = (fabs(slipAmount) > slipThreshold);
 }
 
 void VelocityEstimator::reset()
 {
-    kf_vx = 0.0f;
-    kf_P = 1.0f;
+    kf_position = 0.0f;
+    kf_velocity = 0.0f;
+    
+    // Reset covariance
+    kf_P[0][0] = 1.0f;
+    kf_P[0][1] = 0.0f;
+    kf_P[1][0] = 0.0f;
+    kf_P[1][1] = 1.0f;
+    
     imu_vx = 0.0f;
+    imu_position = 0.0f;
     slipDetected = false;
     slipAmount = 0.0f;
     lastUpdate = 0;

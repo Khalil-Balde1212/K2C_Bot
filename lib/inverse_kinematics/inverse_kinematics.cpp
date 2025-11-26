@@ -29,8 +29,15 @@ void IK::compute(float vx, float vy, float omega) {
     }
     
     // Set steering angles for left/right wheels
-    theta_left = theta_s;
-    theta_right = -theta_s;
+    // CRAB mode: both wheels same angle
+    // PIVOT/ACKERMANN: opposite angles for differential steering
+    if (current_mode == CRAB) {
+        theta_left = theta_s;
+        theta_right = theta_s;  // Same angle for parallel steering
+    } else {
+        theta_left = theta_s;
+        theta_right = -theta_s;  // Opposite for differential
+    }
 }
 
 void IK::computePivot(float omega) {

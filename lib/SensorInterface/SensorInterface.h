@@ -88,6 +88,11 @@ public:
     float getAccelX() const { return ax; }
     float getAccelY() const { return ay; }
     float getAccelZ() const { return az; }
+    
+    // Get gyroscope values (for rotation estimation)
+    float getGyroX() const { return gx; }
+    float getGyroY() const { return gy; }
+    float getGyroZ() const { return gz; }
 
     // Additional methods for compatibility
     float getHeading() const { return getYaw(); }

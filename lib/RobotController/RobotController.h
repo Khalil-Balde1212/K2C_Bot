@@ -50,9 +50,6 @@ private:
     
     // Velocity estimator with Kalman filter
     VelocityEstimator velocityEstimator;
-    
-    // IMU reference for debug
-    IMUInterface* imu;
 
     // Motor configuration
     const float WHEEL_RADIUS = 0.015f;  // meters (30mm diameter wheels = 15mm radius)
@@ -73,6 +70,7 @@ private:
     float rawEncoderVx;  // Raw encoder velocity before Kalman filter (for slip detection debug)
     bool velocityControlEnabled;  // Flag to enable/disable velocity control mode
     unsigned long lastVelocityUpdate;  // Timestamp for velocity computation
+    IMUInterface* imu;  // IMU reference for debug (moved here to fix initialization order)
     int lastLeftDriveCounts, lastRightDriveCounts;  // Previous encoder counts for velocity estimation
 
     // Conversion functions

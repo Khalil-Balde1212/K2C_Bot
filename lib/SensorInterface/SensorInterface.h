@@ -66,7 +66,7 @@ public:
 };
 
 namespace TOF{
-    const int SENSOR_COUNT = 3;
+    const int SENSOR_COUNT = 2;
     class MedianFilter {
         private:
             static const int WINDOW_SIZE = 5;

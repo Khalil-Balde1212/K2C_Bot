@@ -16,6 +16,8 @@ Motor rightPivot(7, 6, 10, 9);
 IMUInterface imu(20.0);
 bool imuAvailable = false; // Track if IMU initialized successfully
 
+TOF::TOFSensors tofSensors;
+
 // Kinematics
 FK odometry;
 
@@ -107,6 +109,23 @@ void setup() {
     lastLeftCounts = *leftMotor.getCounts();
     lastRightCounts = *rightMotor.getCounts();
 
+    //TOF Sensors
+    Serial.println("Initializing TOF sensors...");
+    tofSensors.initialize(
+        new int[TOF::SENSOR_COUNT]{5, 13}, // XSHUT pins 5, 6, 12, 13
+        new uint8_t[TOF::SENSOR_COUNT]{0x30, 0x31}, // I2C addresses
+        A4, A5 // SDA, SCL
+    );
+    if (!tofSensors.begin()) {
+        Serial.println("WARNING: TOF sensors init failed! Continuing without TOF sensors.");
+    } else {
+        Serial.println("TOF sensors initialized!");
+        // Set calibration offsets
+        tofSensors.setSensorOffset(0, -7.0f);  // Left sensor offset
+        tofSensors.setSensorOffset(1, 11.0f);   // Right sensor offset
+    }
+
+    
     Serial.println("=== Ready! ===");
     Serial.println("Commands: direct, auto, lm/rm/lp/rp <pwm>, stop, quiet, status, v<speed>, h<heading>");
 }
@@ -156,82 +175,81 @@ float normalizeAngle(float angle) {
 void loop() {
     unsigned long currentTime = millis();
 
-    // Update IMU at 20Hz (only if available)
-    if (imuAvailable && currentTime - lastTime > 50) {
-        lastTime = currentTime;
-        imu.update();
-    }
+    // // Update IMU at 20Hz (only if available)
+    // if (imuAvailable && currentTime - lastTime > 50) {
+    //     imu.update();
+    // }
 
-    // Control loop at 100Hz
-    if (currentTime - lastProcessTime > 10) {
-        float dt = (currentTime - lastProcessTime) / 1000.0f;
-        lastProcessTime = currentTime;
+    // // Control loop at 100Hz
+    // if (currentTime - lastProcessTime > 10) {
+    //     float dt = (currentTime - lastProcessTime) / 1000.0f;
+    //     lastProcessTime = currentTime;
 
-        // Skip automatic control if in direct control mode
-        if (!directControlMode) {
-            // Get current encoder counts
-            int leftCounts = *leftMotor.getCounts();
-            int rightCounts = *rightMotor.getCounts();
+    //     // Skip automatic control if in direct control mode
+    //     if (!directControlMode) {
+    //         // Get current encoder counts
+    //         int leftCounts = *leftMotor.getCounts();
+    //         int rightCounts = *rightMotor.getCounts();
 
-            // Compute delta counts since last update
-            int deltaLeft = leftCounts - lastLeftCounts;
-            int deltaRight = rightCounts - lastRightCounts;
-            lastLeftCounts = leftCounts;
-            lastRightCounts = rightCounts;
+    //         // Compute delta counts since last update
+    //         int deltaLeft = leftCounts - lastLeftCounts;
+    //         int deltaRight = rightCounts - lastRightCounts;
+    //         lastLeftCounts = leftCounts;
+    //         lastRightCounts = rightCounts;
 
-            // Convert encoder counts to wheel displacement (meters)
-            float distPerCount = (2.0f * PI * WHEEL_RADIUS) / COUNTS_PER_REV;
-            float leftDist = deltaLeft * distPerCount;
-            float rightDist = deltaRight * distPerCount;
+    //         // Convert encoder counts to wheel displacement (meters)
+    //         float distPerCount = (2.0f * PI * WHEEL_RADIUS) / COUNTS_PER_REV;
+    //         float leftDist = deltaLeft * distPerCount;
+    //         float rightDist = deltaRight * distPerCount;
 
-            // Get steering angle from pivot encoder (approximate from left pivot)
-            // CPR for pivot is 2200, convert counts to radians
-            int pivotCounts = *leftPivot.getCounts();
-            float theta_s = (pivotCounts / 2200.0f) * 2.0f * PI;
+    //         // Get steering angle from pivot encoder (approximate from left pivot)
+    //         // CPR for pivot is 2200, convert counts to radians
+    //         int pivotCounts = *leftPivot.getCounts();
+    //         float theta_s = (pivotCounts / 2200.0f) * 2.0f * PI;
 
-            // Build delta_s array [FL, FR, RL, RR] - using same displacement for front/rear
-            float delta_s[4] = {leftDist, rightDist, leftDist, rightDist};
+    //         // Build delta_s array [FL, FR, RL, RR] - using same displacement for front/rear
+    //         float delta_s[4] = {leftDist, rightDist, leftDist, rightDist};
 
-            // Update odometry from actual encoder measurements
-            odometry.updateFromEncoders(delta_s, theta_s, dt);
+    //         // Update odometry from actual encoder measurements
+    //         odometry.updateFromEncoders(delta_s, theta_s, dt);
 
-            // Use IMU heading if available, otherwise assume no heading drift (0 degrees)
-            float fusedHeading = imuAvailable ? imu.getYaw() : 0.0f;
+    //         // Use IMU heading if available, otherwise assume no heading drift (0 degrees)
+    //         float fusedHeading = imuAvailable ? imu.getYaw() : 0.0f;
 
-            // Compute heading error
-            float headingError = normalizeAngle(targetHeading - fusedHeading);
+    //         // Compute heading error
+    //         float headingError = normalizeAngle(targetHeading - fusedHeading);
 
-            // PID control for heading
-            headingErrorIntegral += headingError * dt;
-            headingErrorIntegral = constrain(headingErrorIntegral, -10.0f, 10.0f);
+    //         // PID control for heading
+    //         headingErrorIntegral += headingError * dt;
+    //         headingErrorIntegral = constrain(headingErrorIntegral, -10.0f, 10.0f);
 
-            float headingErrorDerivative = (headingError - lastHeadingError) / dt;
-            lastHeadingError = headingError;
+    //         float headingErrorDerivative = (headingError - lastHeadingError) / dt;
+    //         lastHeadingError = headingError;
 
-            // Compute angular velocity command
-            // Positive error (robot left of target) needs negative omega (turn right/CW)
-            // So omega = -K * error gives correct sign
-            float omega = -(KP_HEADING * headingError +
-                            KI_HEADING * headingErrorIntegral +
-                            KD_HEADING * headingErrorDerivative) * (PI / 180.0f);
+    //         // Compute angular velocity command
+    //         // Positive error (robot left of target) needs negative omega (turn right/CW)
+    //         // So omega = -K * error gives correct sign
+    //         float omega = -(KP_HEADING * headingError +
+    //                         KI_HEADING * headingErrorIntegral +
+    //                         KD_HEADING * headingErrorDerivative) * (PI / 180.0f);
 
-            // Limit omega to stay below PIVOT threshold (0.5 rad/s)
-            omega = constrain(omega, -0.4f, 0.4f);
+    //         // Limit omega to stay below PIVOT threshold (0.5 rad/s)
+    //         omega = constrain(omega, -0.4f, 0.4f);
 
-            // Move forward at desired speed while correcting heading
-            float vx = desiredSpeed;
-            float vy = 0.0f;
+    //         // Move forward at desired speed while correcting heading
+    //         float vx = desiredSpeed;
+    //         float vy = 0.0f;
 
-            // Execute motion
-            executeMotion(vx, vy, omega);
-        }
+    //         // Execute motion
+    //         executeMotion(vx, vy, omega);
+    //     }
 
-        // Always update motors
-        leftMotor.update(lastProcessTime, currentTime);
-        rightMotor.update(lastProcessTime, currentTime);
-        leftPivot.update(lastProcessTime, currentTime);
-        rightPivot.update(lastProcessTime, currentTime);
-    }
+    //     // Always update motors
+    //     leftMotor.update(lastProcessTime, currentTime);
+    //     rightMotor.update(lastProcessTime, currentTime);
+    //     leftPivot.update(lastProcessTime, currentTime);
+    //     rightPivot.update(lastProcessTime, currentTime);
+    // }
 
     // Serial commands
     if (Serial.available() > 0) {
@@ -326,13 +344,31 @@ void loop() {
         // Serial.print(imu.getMz(), 1);
         // Serial.println(")");
     
-        Serial.print("Left Counts:\t");
-        Serial.print(*leftMotor.getCounts());
-        Serial.print(" | Right Counts:\t");
-        Serial.print(*rightMotor.getCounts());
-        Serial.print(" | LeftP Counts:\t");
-        Serial.print(*leftPivot.getCounts());
-        Serial.print(" | RightP Counts:\t");
-        Serial.println(*rightPivot.getCounts());
+        // Serial.print("Left Counts:\t");
+        // Serial.print(*leftMotor.getCounts());
+        // Serial.print(" | Right Counts:\t");
+        // Serial.print(*rightMotor.getCounts());
+        // Serial.print(" | LeftP Counts:\t");
+        // Serial.print(*leftPivot.getCounts());
+        // Serial.print(" | RightP Counts:\t");
+        // Serial.println(*rightPivot.getCounts());
+
+
+        Serial.print("leftTOF:\t");
+        Serial.print(tofSensors.getFilteredDistance(0));
+        Serial.print(" (raw:");
+        Serial.print(tofSensors.readSensor(0));
+        Serial.print(") | rightTOF:\t");
+        Serial.print(tofSensors.getFilteredDistance(1));
+        Serial.print(" (raw:");
+        Serial.print(tofSensors.readSensor(1));
+        Serial.println(")");
+
     }
+
+    leftMotor.update(lastTime, currentTime);
+    rightMotor.update(lastTime, currentTime);
+    leftPivot.update(lastTime, currentTime);
+    rightPivot.update(lastTime, currentTime);
+    lastTime = currentTime;
 }
